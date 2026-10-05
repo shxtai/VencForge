@@ -26,13 +26,13 @@ jobs:
       - name: Build (NSIS)
         shell: pwsh
         run: |
-          npx electron-builder --win nsis 2>&1 | Tee-Object -FilePath nsis.log
+          npx electron-builder --win nsis --publish never 2>&1 | Tee-Object -FilePath nsis.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build (Portable)
         shell: pwsh
         run: |
-          npx electron-builder --win portable 2>&1 | Tee-Object -FilePath portable.log
+          npx electron-builder --win portable --publish never 2>&1 | Tee-Object -FilePath portable.log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Release (attach installers)
