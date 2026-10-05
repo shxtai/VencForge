@@ -36,6 +36,14 @@ function broadcast(event, payload) {
   if (win && !win.isDestroyed()) win.webContents.send(event, payload);
 }
 
+// вывод pnpm/git/esbuild → в лог-панель (иначе сборка выглядит «чёрным ящиком»)
+function logLine(tag, line) {
+  const t = String(line || '').trimEnd();
+  if (!t) return;
+  if (tag === 'err') log.err(t);
+  else log.raw(t);
+}
+
 log.setBroadcast((ev, payload) => broadcast(ev, payload));
 tasks.setBroadcast((ev, payload) => broadcast(ev, payload));
 
@@ -99,7 +107,7 @@ async function buildState() {
       nodePortable: !!tools.portableNodeExe(),
       pnpm: pnpmTool ? { kind: pnpmTool.kind, path: pnpmTool.path, src: pnpmTool.src } : null,
     },
-    clients: installs.map((c) => ({ ...c, openAsar: install.asarStatus(c).openAsar })),
+    clients: installs.map((c) => ({ ...c, ...install.asarStatus(c) })),
     running,
     schedule: { enabled: await schedule.scheduleExists(), hours: st.settings.intervalHours },
     settings: st.settings,
@@ -128,7 +136,7 @@ function handle(channel, fn) {
 handle('state:get', () => buildState());
 
 handle('task:updateAll', ({ force }) => startTask('updateAll', 'Обновление и установка', async () => {
-  const res = await updateEverything({ what: 'full', silent: false });
+  const res = await updateEverything({ what: 'full', silent: false, onLine: logLine });
   if (res.needClose) return { needClose: res.needClose, detail: 'Клиенты запущены: ' + res.needClose.join(', ') };
   return { detail: 'Готово', res };
 }));
@@ -139,12 +147,12 @@ handle('task:updateAllForce', () => startTask('updateAllForce', 'Обновле�
     log.info('Закрываю клиенты: ' + running.join(', '));
     await clients.killClients(running);
   }
-  const res = await updateEverything({ what: 'full', silent: true });
+  const res = await updateEverything({ what: 'full', silent: true, onLine: logLine });
   return { detail: 'Готово', res };
 }));
 
 handle('task:buildOnly', () => startTask('buildOnly', 'Сборка Vencord', async () => {
-  await updateEverything({ what: 'build-only', silent: true });
+  await updateEverything({ what: 'build-only', silent: true, onLine: logLine });
   return { detail: 'Сборка обновлена' };
 }));
 
@@ -277,7 +285,7 @@ app.whenReady().then(async () => {
     // тихий режим для планировщика: обновить всё и выйти
     log.info('VencForge: тихое автообновление (по расписанию)');
     try {
-      await updateEverything({ what: 'full', silent: true });
+      await updateEverything({ what: 'full', silent: true, onLine: logLine });
       notify('VencForge: автообновление завершено', 'Смотри лог: ' + paths.LogFile);
     } catch (e) {
       log.err('Автообновление не удалось: ' + (e && e.message));
@@ -300,7 +308,7 @@ app.whenReady().then(async () => {
     if (tasks.isBusy()) return;
     log.info('Авто-проверка обновлений при запуске...');
     await tasks.runTask('startup', 'Авто-проверка обновлений', async () => {
-      const res = await updateEverything({ what: 'full', silent: true });
+      const res = await updateEverything({ what: 'full', silent: true, onLine: logLine });
       return { detail: res.patched ? 'Всё свежее и установлено' : 'Готово (патч мог быть пропущен — клиенты были запущены)' };
     });
   }, 1500);

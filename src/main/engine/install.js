@@ -3,9 +3,16 @@
 //   app.asar          — наш шим (require patcher.js сборки VencForge)
 //   _app.asar         — то, что грузит шим: OpenAsar (если включён) или оригинал Discord
 //   app-original.asar — нетронутая копия оригинала Discord (для отката OpenAsar/всего патча)
+//
+// ВАЖНО: все операции с .asar-файлами — через fsx (original-fs). Обычный fs в
+// пакнутом Electron патчится и превращает работу с самим asar-архивом в поиск
+// записи '' внутри него («ENOENT,  not found in _app.asar»).
+// Ещё бывает сломанное состояние: app.asar — ПАПКА (после апдейтов Discord или
+// старых установщиков). Чинится рекурсивной очисткой и перепатчиванием.
 const fs = require('fs');
 const path = require('path');
 const util = require('./util');
+const { fsx, pathKind, copyFile, rmrfSafe } = util;
 const log = require('./log');
 const { buildAsarShim } = require('./asar');
 const clients = require('./clients');
@@ -20,17 +27,21 @@ function requirePatcher() {
   return patcher;
 }
 
-// внутри asar'а OpenAsar есть строки "OpenAsar"; в оригинальном Discord их нет
+// внутри asar'а OpenAsar есть строки "OpenAsar"; в оригинальном Discord их нет.
+// Читаем сырые байты через fsx (обычный fs в Electron с архевом так не умеет)
 function isOpenAsarAsar(p) {
   try {
-    const st = fs.statSync(p);
+    const st = fsx.statSync(p);
     if (!st.isFile() || st.size < 4096) return false;
-    const fd = fs.openSync(p, 'r');
-    const len = Math.min(st.size, 4 * 1024 * 1024);
-    const buf = Buffer.alloc(len);
-    fs.readSync(fd, buf, 0, len, 0);
-    fs.closeSync(fd);
-    return /openasar/i.test(buf.toString('latin1'));
+    const fd = fsx.openSync(p, 'r');
+    try {
+      const len = Math.min(st.size, 4 * 1024 * 1024);
+      const buf = Buffer.alloc(len);
+      fsx.readSync(fd, buf, 0, len, 0);
+      return /openasar/i.test(buf.toString('latin1'));
+    } finally {
+      try { fsx.closeSync(fd); } catch { }
+    }
   } catch {
     return false;
   }
@@ -39,8 +50,90 @@ function isOpenAsarAsar(p) {
 function asarStatus(di) {
   const appAsar = path.join(di.resources, 'app.asar');
   const backupAsar = path.join(di.resources, '_app.asar');
-  if (!util.exists(backupAsar)) return { patched: false, openAsar: false };
-  return { patched: true, openAsar: isOpenAsarAsar(backupAsar) };
+  const appKind = pathKind(appAsar);
+  const patched = !!util.exists(backupAsar);
+  return {
+    patched,
+    openAsar: patched && isOpenAsarAsar(backupAsar),
+    broken: appKind === 'dir',
+    appKind,
+  };
+}
+
+// патч одного Discord-установза. Вынесено отдельно — легко тестировать
+async function patchOne(di, { patcher, wantOpenAsar } = {}) {
+  const res = di.resources;
+  const appAsar = path.join(res, 'app.asar');
+  const backupAsar = path.join(res, '_app.asar');
+  const originalAsar = path.join(res, 'app-original.asar');
+
+  let appKind = pathKind(appAsar);
+  let backupKind = pathKind(backupAsar);
+
+  // 0. сломанное состояние: app.asar — ПАПКА (Discord-апдейтер/старые установщики)
+  if (appKind === 'dir') {
+    log.warn(`Discord ${di.label}: app.asar оказался ПАПКОЙ (сломанное состояние) — чищу`);
+    if (!rmrfSafe(appAsar)) throw new Error('не смог удалить папку app.asar (клиент запущен?)');
+    appKind = null;
+  }
+
+  // 1. бэкап оригинала — один раз, потом никогда не трогаем
+  if (!util.exists(originalAsar)) {
+    // берём только настоящий Discord-asar (не OpenAsar)
+    if (backupKind === 'file' && !isOpenAsarAsar(backupAsar)) {
+      copyFile(backupAsar, originalAsar);
+    } else if (appKind === 'file' && !isOpenAsarAsar(appAsar)) {
+      copyFile(appAsar, originalAsar);
+    } else {
+      log.warn(`Discord ${di.label}: оригинальный app.asar не найден (только OpenAsar?) — откат возможен переустановкой Discord`);
+    }
+  }
+
+  // 2. снова вычисляем appKind (мог почиститься) и готовим _app.asar — то, что грузит шим
+  appKind = pathKind(appAsar);
+  backupKind = pathKind(backupAsar);
+  if (backupKind !== 'file') {
+    if (backupKind === 'dir') {
+      log.warn(`Discord ${di.label}: _app.asar оказался ПАПКОЙ — чищу`);
+      if (!rmrfSafe(backupAsar)) throw new Error('не смог удалить папку _app.asar (клиент запущен?)');
+    }
+    if (appKind === 'file') {
+      fsx.renameSync(appAsar, backupAsar);
+    } else if (util.exists(originalAsar)) {
+      copyFile(originalAsar, backupAsar);
+    } else if (wantOpenAsar) {
+      // оригинала нет вообще — OpenAsar самостоятельный бутстрап, им можно заменить
+      log.info(`Discord ${di.label}: оригинала нет — ставлю OpenAsar как основу`);
+      await util.download(OPENASAR_URL, backupAsar);
+    } else {
+      throw new Error('нет ни app.asar, ни бэкапа — включи OpenAsar в настройках или переустанови Discord');
+    }
+  }
+
+  // 3. OpenAsar (тумблер в настройках, по умолчанию включён)
+  if (wantOpenAsar) {
+    if (isOpenAsarAsar(backupAsar)) {
+      log.info(`Discord ${di.label}: OpenAsar уже установлен`);
+    } else {
+      try {
+        await util.download(OPENASAR_URL, backupAsar);
+        log.ok(`Discord ${di.label}: OpenAsar установлен (оригинал сохранён в app-original.asar)`);
+      } catch (e) {
+        log.warn(`Discord ${di.label}: OpenAsar скачать не удалось (${e.message}) — продолжаю без него`);
+      }
+    }
+  } else if (isOpenAsarAsar(backupAsar) && util.exists(originalAsar)) {
+    copyFile(originalAsar, backupAsar);
+    log.info(`Discord ${di.label}: OpenAsar снят (в настройках выключен)`);
+  }
+
+  // 4. наш шим поверх (перезаписываем любой файл; папку — только если снова появилась)
+  if (pathKind(appAsar) === 'dir' && !rmrfSafe(appAsar)) {
+    throw new Error('app.asar снова папка и не удаляется (клиент запущен?)');
+  }
+  buildAsarShim(patcher, appAsar);
+  log.ok(`Discord ${di.label}: патч обновлён${wantOpenAsar ? ' + OpenAsar' : ''} (Vencord из сборки VencForge)`);
+  return true;
 }
 
 // патч всех найденных Discord: шим + (опционально) OpenAsar
@@ -50,47 +143,8 @@ async function patchDiscord() {
   const wantOpenAsar = !!getState().settings.installOpenAsar;
   let n = 0;
   for (const di of installs) {
-    const appAsar = path.join(di.resources, 'app.asar');
-    const backupAsar = path.join(di.resources, '_app.asar');
-    const originalAsar = path.join(di.resources, 'app-original.asar');
     try {
-      // 1. бэкап оригинала (один раз, потом никогда не трогаем)
-      if (!util.exists(originalAsar)) {
-        if (util.exists(backupAsar)) fs.copyFileSync(backupAsar, originalAsar);
-        else if (util.exists(appAsar)) fs.copyFileSync(appAsar, originalAsar);
-      }
-
-      // 2. _app.asar — то, что грузит наш шим
-      if (!util.exists(backupAsar)) {
-        if (util.exists(appAsar)) fs.renameSync(appAsar, backupAsar);
-        else if (util.exists(originalAsar)) fs.copyFileSync(originalAsar, backupAsar);
-      }
-      if (!util.exists(backupAsar)) {
-        log.warn(`Discord ${di.label}: нет app.asar — пропускаю`);
-        continue;
-      }
-
-      // 3. OpenAsar
-      if (wantOpenAsar) {
-        if (isOpenAsarAsar(backupAsar)) {
-          log.info(`Discord ${di.label}: OpenAsar уже установлен`);
-        } else {
-          try {
-            await util.download(OPENASAR_URL, backupAsar);
-            log.ok(`Discord ${di.label}: OpenAsar установлен (оригинал сохранён в app-original.asar)`);
-          } catch (e) {
-            log.warn(`Discord ${di.label}: OpenAsar скачать не удалось (${e.message}) — продолжаю без него`);
-          }
-        }
-      } else if (isOpenAsarAsar(backupAsar) && util.exists(originalAsar)) {
-        fs.copyFileSync(originalAsar, backupAsar);
-        log.info(`Discord ${di.label}: OpenAsar снят (в настройках выключен)`);
-      }
-
-      // 4. наш шим поверх
-      buildAsarShim(patcher, appAsar);
-      log.ok(`Discord ${di.label}: патч обновлён${wantOpenAsar ? ' + OpenAsar' : ''} (Vencord из сборки VencForge)`);
-      n++;
+      if (await patchOne(di, { patcher, wantOpenAsar })) n++;
     } catch (e) {
       log.err(`Discord ${di.label}: не удалось пропатчить — ${e.message} (клиент запущен?)`);
     }
@@ -106,20 +160,26 @@ async function unpatchDiscord() {
   const installs = clients.findDiscordInstalls();
   let n = 0;
   for (const di of installs) {
-    const appAsar = path.join(di.resources, 'app.asar');
-    const backupAsar = path.join(di.resources, '_app.asar');
-    const originalAsar = path.join(di.resources, 'app-original.asar');
-    if (!util.exists(backupAsar) && !util.exists(originalAsar)) continue;
+    const res = di.resources;
+    const appAsar = path.join(res, 'app.asar');
+    const backupAsar = path.join(res, '_app.asar');
+    const originalAsar = path.join(res, 'app-original.asar');
+    if (!util.exists(backupAsar) && !util.exists(originalAsar) && pathKind(appAsar) === null) continue;
     try {
       const src = util.exists(originalAsar) ? originalAsar : backupAsar;
-      if (util.exists(originalAsar) && util.exists(backupAsar)) fs.rmSync(backupAsar, { force: true });
-      if (util.exists(appAsar)) fs.rmSync(appAsar, { force: true });
-      fs.copyFileSync(src, appAsar);
-      if (util.exists(originalAsar)) fs.rmSync(originalAsar, { force: true });
+      // recursive: app.asar/_app.asar могут быть папками (сломанное состояние) — EISDIR без него
+      rmrfSafe(backupAsar);
+      rmrfSafe(appAsar);
+      if (src && util.exists(src)) {
+        copyFile(src, appAsar);
+      } else {
+        log.warn(`Discord ${di.label}: бэкапа нет — оригинал придётся переустановить с discord.com`);
+      }
+      rmrfSafe(originalAsar);
       log.ok(`Discord ${di.label}: оригинал восстановлен`);
       n++;
     } catch (e) {
-      log.err(`Discord ${di.label}: не удалось восстановить — ${e.message}`);
+      log.err(`Discord ${di.label}: не удалось восстановить — ${e.message} (клиент запущен?)`);
     }
   }
   if (n === 0) log.info('Пропатченных установок Discord не найдено');
@@ -152,9 +212,9 @@ async function applyVencordSettings() {
 
 // диагностика текстом в лог
 async function doctor() {
-  const gitops = require('./gitops');
   const tools = require('./tools');
   log.info('=== VencForge: диагностика ===');
+  const gitops = require('./gitops');
   const g = await gitops.hasGit();
   const node = await tools.systemNodeVersion();
   log.info(`git: ${g ? 'есть' : 'НЕТ (буду качать zip)'}`);
@@ -172,11 +232,12 @@ async function doctor() {
   log.info(`OpenAsar: ${wantOpenAsar ? 'включён в установку' : 'выключен в настройках'}`);
   for (const di of clients.findDiscordInstalls()) {
     const st = asarStatus(di);
-    log.info(`Discord ${di.label} ${di.version}: ${st.patched ? 'пропатчен' : 'оригинал'}${st.patched ? (st.openAsar ? ' + OpenAsar' : ' без OpenAsar') : ''} (${di.resources})`);
+    const kindTxt = st.appKind === 'dir' ? 'app.asar — ПАПКА (сломано!)' : st.appKind === 'file' ? 'app.asar есть' : 'app.asar нет';
+    log.info(`Discord ${di.label} ${di.version}: ${st.patched ? 'пропатчен' : 'оригинал'}${st.patched ? (st.openAsar ? ' + OpenAsar' : ' без OpenAsar') : ''}${st.broken ? ' [СЛОМАН: app.asar — папка]' : ''} (${di.resources}; ${kindTxt})`);
   }
   const running = await clients.getRunningClients();
   log.info(`запущено клиентов: ${running.length ? running.join(', ') : 'нет'}`);
   log.info('=== конец диагностики ===');
 }
 
-module.exports = { patchDiscord, unpatchDiscord, applyVencordSettings, doctor, requirePatcher, asarStatus };
+module.exports = { patchDiscord, unpatchDiscord, applyVencordSettings, doctor, requirePatcher, asarStatus, patchOne, isOpenAsarAsar };

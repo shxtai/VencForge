@@ -111,7 +111,7 @@ function renderAll() {
   // клиенты (главная)
   const items = S.clients.map((c) => `
     <div class="mini"><span class="name">${esc(c.label)} ${esc(c.version)}</span>
-      <span class="sub">${c.patched ? (c.openAsar ? 'пропатчен + OpenAsar' : 'пропатчен') : 'оригинал'}</span>
+      <span class="sub">${c.broken ? 'СЛОМАНО: app.asar — папка' : c.patched ? (c.openAsar ? 'пропатчен + OpenAsar' : 'пропатчен') : 'оригинал'}</span>
       <span class="flex-sp"></span>
       <button class="btn small" data-run="${esc(c.branch)}">Запустить</button></div>`).join('');
   $('homeClients').innerHTML = items || '<div class="empty">Discord не найден — установи с discord.com/download</div>';
@@ -128,7 +128,7 @@ function renderAll() {
     <div class="card client-card">
       <div class="client-ico">💬</div>
       <div class="client-info">
-        <div class="client-name">${esc(c.label)}<span class="pill ${c.patched ? 'ok' : 'off'}">${c.patched ? (c.openAsar ? 'Vencord + OpenAsar' : 'Vencord установлен') : 'без Vencord'}</span></div>
+        <div class="client-name">${esc(c.label)}<span class="pill ${c.broken ? 'warn' : c.patched ? 'ok' : 'off'}">${c.broken ? 'патч сломан — «Починить Discord»' : c.patched ? (c.openAsar ? 'Vencord + OpenAsar' : 'Vencord установлен') : 'без Vencord'}</span></div>
         <div class="client-sub">версия ${esc(c.version)} · ${esc(c.resources)}</div>
       </div>
       <div class="client-actions">

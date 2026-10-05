@@ -36,6 +36,25 @@ function repoNameFromUrl(url) {
   return m ? m[1] : null;
 }
 
+// метка свежести исходника (folder/file): максимальный mtime файлов
+function srcStamp(p) {
+  try {
+    const st = fs.statSync(p);
+    if (st.isFile()) return st.mtimeMs;
+    let max = 0;
+    const walk = (d) => {
+      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        if (e.name === '.git') continue;
+        const fp = path.join(d, e.name);
+        if (e.isDirectory()) walk(fp);
+        else { const s = fs.statSync(fp); if (s.mtimeMs > max) max = s.mtimeMs; }
+      }
+    };
+    walk(p);
+    return max;
+  } catch { return 0; }
+}
+
 async function addGit(url) {
   const name = util.safeName(repoNameFromUrl(url) || '');
   if (!name) throw new Error('Не понял ссылку — нужен адрес репозитория GitHub');
@@ -71,7 +90,7 @@ async function addFolder(folderPath) {
   util.copyDir(folderPath, dir);
   const cfg = getConfig();
   cfg.plugins.push({
-    name, type: 'folder', sourcePath: folderPath, addedAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    name, type: 'folder', sourcePath: folderPath, srcStamp: srcStamp(folderPath), addedAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
   });
   saveConfig();
   log.ok(`Плагин «${name}» добавлен (папка)`);
@@ -94,7 +113,7 @@ async function addFile(filePath) {
   fs.copyFileSync(filePath, path.join(dir, 'index' + ext));
   const cfg = getConfig();
   cfg.plugins.push({
-    name, type: 'file', sourcePath: filePath, addedAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    name, type: 'file', sourcePath: filePath, srcStamp: srcStamp(filePath), addedAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
   });
   saveConfig();
   log.ok(`Плагин «${name}» добавлен (файл)`);
@@ -105,14 +124,21 @@ async function updatePlugin(name) {
   const meta = getPluginMeta(name);
   if (!meta) throw new Error('Плагин не найден: ' + name);
   const dir = path.join(PluginsDir, name);
+  let changed = false;
   if (meta.type === 'git') {
     const r = await gitops.syncRepo({ url: meta.url, dir, branch: 'main' });
     if (!r.ok) throw new Error('git не обновился (сеть?)');
     if (!findPluginRoot(dir)) throw new Error('После обновления в репозитории не найден index.*');
+    changed = !!r.changed;
   } else {
     const src = meta.sourcePath;
     if (!src || !util.exists(src)) {
       log.warn(`Исходник «${src || '?'}» недоступен — оставляю предыдущую копию`);
+      return { changed: false };
+    }
+    const stamp = srcStamp(src);
+    if (meta.srcStamp && stamp === meta.srcStamp) {
+      log.info(`Плагин «${name}» без изменений (исходник не менялся)`);
       return { changed: false };
     }
     if (meta.type === 'folder') {
@@ -126,11 +152,15 @@ async function updatePlugin(name) {
       fs.mkdirSync(dir, { recursive: true });
       fs.copyFileSync(src, path.join(dir, 'index' + ext));
     }
+    meta.srcStamp = stamp;
+    changed = true;
   }
-  meta.updatedAt = new Date().toISOString();
-  saveConfig();
-  log.ok(`Плагин «${name}» обновлён`);
-  return { changed: true };
+  if (changed) {
+    meta.updatedAt = new Date().toISOString();
+    saveConfig();
+    log.ok(`Плагин «${name}» обновлён`);
+  }
+  return { changed };
 }
 
 async function removePlugin(name) {

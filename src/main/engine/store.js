@@ -23,6 +23,7 @@ function normalizePlugin(p) {
   };
   if (p.url) out.url = String(p.url);
   if (p.sourcePath) out.sourcePath = String(p.sourcePath);
+  if (p.srcStamp != null) out.srcStamp = p.srcStamp;
   if (p.branch) out.branch = String(p.branch);
   if (p.addedAt) out.addedAt = p.addedAt;
   if (p.updatedAt) out.updatedAt = p.updatedAt;

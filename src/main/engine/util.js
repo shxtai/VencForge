@@ -7,6 +7,14 @@ const http = require('http');
 
 function log2(txt) { const log = require('./log'); log.raw(txt); }
 
+// ВАЖНО: в пакнутом Electron fs патчится (asar-виртуальная ФС). Любая работа с
+// .asar-ФАЙЛАМИ (копия/переименование/чтение/запись самого архива) обязана идти
+// через original-fs, иначе Electron ищет запись '' внутри архива и кидает
+// «ENOENT,  not found in ...\_app.asar». В обычном Node original-fs нет — там fs.
+let fsx;
+try { fsx = require('original-fs'); } catch { fsx = fs; }
+if (!fsx || typeof fsx.readFileSync !== 'function') fsx = fs;
+
 // ---------------------------------------------------------------- процессы
 const IS_WIN = process.platform === 'win32';
 
@@ -98,14 +106,15 @@ function download(url, dest, { headers = {}, onProgress } = {}, depth = 0) {
       const total = parseInt(res.headers['content-length'] || '0', 10);
       let got = 0;
       const tmp = dest + '.part';
-      const file = fs.createWriteStream(tmp);
+      // fsx: dest может быть .asar-файлом (OpenAsar) — обычный fs в Electron его патчит
+      const file = fsx.createWriteStream(tmp);
       res.on('data', (chunk) => {
         got += chunk.length;
         if (onProgress && total) onProgress(got, total);
       });
       res.pipe(file);
       file.on('finish', () => file.close(() => {
-        try { fs.renameSync(tmp, dest); resolve(dest); }
+        try { fsx.renameSync(tmp, dest); resolve(dest); }
         catch (e) { reject(e); }
       }));
       file.on('error', reject);
@@ -166,7 +175,25 @@ function safeName(name) {
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
+// рекурсивное удаление через original-fs (app.asar может оказаться ПАПКОЙ — сломанное
+// состояние после апдейтов Discord/старых установщиков; rmSync без recursive = EISDIR)
+function rmrfSafe(p) {
+  try { fsx.rmSync(p, { recursive: true, force: true }); return true; }
+  catch (e) { log2('rmrfSafe ' + p + ': ' + (e && e.message)); return false; }
+}
+
+// тип пути по original-fs: 'file' | 'dir' | null
+function pathKind(p) {
+  try { return fsx.statSync(p).isDirectory() ? 'dir' : 'file'; } catch { return null; }
+}
+
+function copyFile(src, dest) {
+  fs.mkdirSync(path.dirname(dest), { recursive: true });
+  fsx.copyFileSync(src, dest);
+}
+
 module.exports = {
   exec, stream, download, fetchText, unzip,
-  exists, rmrf, readJson, writeJsonNoBom, copyDir, safeName, sleep,
+  exists, rmrf, rmrfSafe, readJson, writeJsonNoBom, copyDir, safeName, sleep,
+  fsx, pathKind, copyFile,
 };

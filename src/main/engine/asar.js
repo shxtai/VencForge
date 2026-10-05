@@ -1,7 +1,9 @@
 // VencForge — сборка минимального asar-шима для Discord
 // Формат 1:1 повторяет рабочий вариант из VencForge.ps1 (проверен @electron/asar):
 // Discord грузит наш app.asar, который делает require("<DistDir>\\patcher.js")
+// Пишем через fsx (original-fs): обычный fs в пакнутом Electron патчит .asar-пути
 const fs = require('fs');
+const { fsx } = require('./util');
 
 function buildAsarShim(patcherPath, outFile) {
   const esc = patcherPath.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
@@ -29,7 +31,7 @@ function buildAsarShim(patcherPath, outFile) {
   if (pad > 0) Buffer.from('0'.repeat(pad), 'utf8').copy(out, 16 + hdrB.length);
   idxB.copy(out, 16 + aligned);
   pkgB.copy(out, 16 + aligned + idxB.length);
-  fs.writeFileSync(outFile, out);
+  fsx.writeFileSync(outFile, out);
 }
 
 module.exports = { buildAsarShim };

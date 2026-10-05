@@ -9,6 +9,20 @@ const plugins = require('./plugins');
 const { VcDir, DistDir } = require('./paths');
 const { getConfig, saveState, getState } = require('./store');
 
+// проверка: плагины реально вкомпилированы в бандлы (grep имени по dist)
+function verifyPluginsInDist(pluginNames, distDir) {
+  const pick = (f) => { try { return fs.readFileSync(path.join(distDir, f), 'utf8'); } catch { return null; } };
+  const web = pick('renderer.js');
+  const desktop = pick('vencordDesktopRenderer.js');
+  const main = pick('vencordDesktopMain.js');
+  return pluginNames.map((name) => ({
+    name,
+    inWeb: !!(web && web.includes(name)),
+    inDesktop: !!(desktop && desktop.includes(name)),
+    inMain: !!(main && main.includes(name)),
+  }));
+}
+
 async function buildVencord({ onLine, force = false } = {}) {
   const cfg = getConfig();
   const say = (tag, line) => { if (onLine) onLine(tag, line); };
@@ -27,6 +41,7 @@ async function buildVencord({ onLine, force = false } = {}) {
   const pnpmTool = await tools.ensurePnpm(node, onLine);
   if (!pnpmTool) throw new Error('pnpm недоступен — сборка невозможна');
 
+  const tInstall = Date.now();
   log.info('Устанавливаю зависимости Vencord (pnpm install)...');
   let code = await tools.pnpm(node, pnpmTool, ['install', '--frozen-lockfile'], VcDir, onLine);
   if (code !== 0) {
@@ -34,10 +49,13 @@ async function buildVencord({ onLine, force = false } = {}) {
     code = await tools.pnpm(node, pnpmTool, ['install', '--no-frozen-lockfile'], VcDir, onLine);
     if (code !== 0) throw new Error('pnpm install не удался');
   }
+  const installSec = ((Date.now() - tInstall) / 1000).toFixed(1);
 
-  log.info('Собираю Vencord (pnpm build)...');
+  const tBuild = Date.now();
+  log.info('Собираю Vencord (pnpm build) — это живой esbuild из исходников...');
   code = await tools.pnpm(node, pnpmTool, ['build'], VcDir, onLine);
-  if (code !== 0) throw new Error('pnpm build не удался');
+  if (code !== 0) throw new Error('pnpm build не удался (весь вывод выше — смотри ошибки esbuild)');
+  const buildSec = ((Date.now() - tBuild) / 1000).toFixed(1);
 
   const mainJs = path.join(VcDir, 'dist', 'vencordDesktopMain.js');
   const patcher = path.join(VcDir, 'dist', 'patcher.js');
@@ -54,6 +72,34 @@ async function buildVencord({ onLine, force = false } = {}) {
   }
   fs.writeFileSync(path.join(DistDir, 'package.json'), '{}', 'utf8');
 
+  log.info(`Тайминги: pnpm install ${installSec} c · pnpm build ${buildSec} c`);
+
+  // проверка, что кастомные плагины реально вкомпилированы (анти-«сборка-пустышка»)
+  const names = cfg.plugins.map((p) => p.name);
+  if (names.length) {
+    for (const r of verifyPluginsInDist(names, DistDir)) {
+      if (r.inWeb || r.inDesktop) {
+        log.ok(`Плагин «${r.name}» вкомпилирован в сборку${r.inMain ? ' (+нативная часть)' : ''}`);
+      } else {
+        log.err(`Плагин «${r.name}» НЕ найден в dist — проверь исходники (нужен export default definePlugin({...}))`);
+      }
+    }
+  }
+
+  // размер dist для наглядности
+  try {
+    let bytes = 0, files = 0;
+    const walk = (d) => {
+      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        const p = path.join(d, e.name);
+        if (e.isDirectory()) walk(p);
+        else { bytes += fs.statSync(p).size; files++; }
+      }
+    };
+    walk(DistDir);
+    log.info(`dist: ${files} файлов, ${(bytes / 1048576).toFixed(1)} МБ`);
+  } catch { }
+
   const head = await gitops.gitHead(VcDir);
   const s = getState();
   s.lastBuild = { time: new Date().toISOString(), head };
@@ -62,4 +108,4 @@ async function buildVencord({ onLine, force = false } = {}) {
   return { ok: true, head };
 }
 
-module.exports = { buildVencord };
+module.exports = { buildVencord, verifyPluginsInDist };
