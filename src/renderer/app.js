@@ -79,11 +79,10 @@ function renderAll() {
   // hero
   const dist = S.vencord.distReady;
   const patchedN = S.clients.filter((c) => c.patched).length;
-  const linked = S.vesktop.linked;
   if (!dist) {
     $('heroTitle').textContent = 'Сборки ещё нет';
-    $('heroSub').textContent = 'Нажми «Обновить и установить всё» — VencForge скачает Vencord, подключит плагины, соберёт и пропатчит Discord/Vesktop.';
-  } else if (patchedN === 0 && !(S.vesktop.found && linked)) {
+    $('heroSub').textContent = 'Нажми «Обновить и установить всё» — VencForge скачает Vencord, подключит плагины, соберёт и пропатчит Discord (+ OpenAsar).';
+  } else if (patchedN === 0) {
     $('heroTitle').textContent = 'Сборка готова, но клиенты не подключены';
     $('heroSub').textContent = 'Запусти «Обновить и установить всё» или «Починить Discord», чтобы применить сборку.';
   } else {
@@ -94,14 +93,15 @@ function renderAll() {
   $('heroStats').innerHTML = `
     <div class="stat">Сборка Vencord <b>${dist ? (S.vencord.head ? 'Vencord ' + esc(S.vencord.head) : 'есть') : 'нет'}</b></div>
     <div class="stat">Плагины <b>${S.config.plugins.map((p) => esc(p.name)).join(', ') || '—'}</b></div>
-    <div class="stat">Discord пропатчен <b>${patchedN ? patchedN + ' из ' + S.clients.length : 'нет'}</b></div>
-    <div class="stat">Vesktop <b>${!S.vesktop.found ? 'не установлен' : linked ? 'подключён' : (S.vesktop.foreign ? 'чужая сборка' : 'не подключён')}</b></div>`;
+    <div class="stat">Discord пропатчен <b>${patchedN ? patchedN + ' из ' + S.clients.length : 'нет'}</b></div>`;
 
   // статус
   const t = S.tools;
+  const pnpmTxt = t.pnpm
+    ? 'pnpm ✓ (' + esc(t.pnpm.src || 'найден') + ')'
+    : 'pnpm — подберу при сборке';
   const toolsTxt = (t.git ? 'git ✓' : 'git → zip-фолбэк') + ' · ' +
-    (t.node ? 'node ' + esc(t.node) : 'node — скачает при сборке') + ' · ' +
-    (t.pnpm ? 'pnpm ✓' : 'pnpm — при сборке');
+    (t.node ? 'node ' + esc(t.node) : 'node — скачает при сборке') + ' · ' + pnpmTxt;
   $('statusList').innerHTML = `
     <div class="kv"><span class="k">Инструменты</span><span class="v">${toolsTxt}</span></div>
     <div class="kv"><span class="k">Последняя сборка</span><span class="v">${S.vencord.lastBuild ? new Date(S.vencord.lastBuild.time).toLocaleString('ru-RU') + (S.vencord.lastBuild.head ? ' · ' + esc(S.vencord.lastBuild.head) : '') : '—'}</span></div>
@@ -111,20 +111,13 @@ function renderAll() {
   // клиенты (главная)
   const items = S.clients.map((c) => `
     <div class="mini"><span class="name">${esc(c.label)} ${esc(c.version)}</span>
-      <span class="sub">${c.patched ? 'пропатчен' : 'оригинал'}</span>
+      <span class="sub">${c.patched ? (c.openAsar ? 'пропатчен + OpenAsar' : 'пропатчен') : 'оригинал'}</span>
       <span class="flex-sp"></span>
       <button class="btn small" data-run="${esc(c.branch)}">Запустить</button></div>`).join('');
-  const vesp = S.vesktop.found ? `
-    <div class="mini"><span class="name">Vesktop</span>
-      <span class="sub">${S.vesktop.linked ? 'подключён к сборке' : (S.vesktop.foreign ? 'чужая сборка: ' + esc(S.vesktop.vencordDir) : 'официальный Vencord')}</span>
-      <span class="flex-sp"></span>
-      <button class="btn small" id="miniRunVesktop">Запустить</button></div>` : '';
-  $('homeClients').innerHTML = (items || '<div class="empty">Discord не найден — установи с discord.com/download</div>') + vesp;
+  $('homeClients').innerHTML = items || '<div class="empty">Discord не найден — установи с discord.com/download</div>';
   document.querySelectorAll('[data-run]').forEach((b) => {
     b.onclick = async () => { await invoke('clients:run', { branch: b.dataset.run }); toast('Запускаю ' + b.dataset.run); };
   });
-  const mv = $('miniRunVesktop');
-  if (mv) mv.onclick = async () => { await invoke('vesktop:run', {}); toast('Запускаю Vesktop'); };
 
   // предупреждение о запущенных
   $('runningWarn').classList.toggle('hidden', !S.running.length);
@@ -135,27 +128,14 @@ function renderAll() {
     <div class="card client-card">
       <div class="client-ico">💬</div>
       <div class="client-info">
-        <div class="client-name">${esc(c.label)}<span class="pill ${c.patched ? 'ok' : 'off'}">${c.patched ? 'Vencord установлен' : 'без Vencord'}</span></div>
+        <div class="client-name">${esc(c.label)}<span class="pill ${c.patched ? 'ok' : 'off'}">${c.patched ? (c.openAsar ? 'Vencord + OpenAsar' : 'Vencord установлен') : 'без Vencord'}</span></div>
         <div class="client-sub">версия ${esc(c.version)} · ${esc(c.resources)}</div>
       </div>
       <div class="client-actions">
         <button class="btn small" data-run2="${esc(c.branch)}">Запустить</button>
         <button class="btn small subtle" data-reveal="${esc(c.appDir)}">Папка</button>
       </div>
-    </div>`).join('') || '<div class="card"><div class="empty">Discord (Stable/PTB/Canary) не найден. Установи Discord — discord.com/download, затем вернись сюда.</div></div>')
-    + (S.vesktop.found ? `
-    <div class="card client-card">
-      <div class="client-ico">🖥</div>
-      <div class="client-info">
-        <div class="client-name">Vesktop<span class="pill ${S.vesktop.linked ? 'ok' : (S.vesktop.foreign ? 'warn' : 'off')}">${S.vesktop.linked ? 'сборка VencForge' : (S.vesktop.foreign ? 'чужая сборка' : 'официальный Vencord')}</span></div>
-        <div class="client-sub">${esc(S.vesktop.vencordDir || 'vencordDir не задан (используется встроенный Vencord)')}</div>
-      </div>
-      <div class="client-actions">
-        ${S.vesktop.linked ? '' : `<button class="btn small" id="btnLinkVesktop">Подключить сборку</button>`}
-        ${S.vesktop.vencordDir ? `<button class="btn small subtle" id="btnUnlinkVesktop">Отвязать</button>` : ''}
-        ${S.vesktop.exe ? `<button class="btn small subtle" id="btnRunVesktop2">Запустить</button>` : ''}
-      </div>
-    </div>` : '<div class="card"><div class="empty">Vesktop не найден (нет папки %APPDATA%\\vesktop) — если он нужен, установи с vencord.dev</div></div>');
+    </div>`).join('') || '<div class="card"><div class="empty">Discord (Stable/PTB/Canary) не найден. Установи Discord — discord.com/download, затем вернись сюда.</div></div>');
 
   document.querySelectorAll('[data-run2]').forEach((b) => {
     b.onclick = async () => { await invoke('clients:run', { branch: b.dataset.run2 }); toast('Запускаю ' + b.dataset.run2); };
@@ -163,12 +143,6 @@ function renderAll() {
   document.querySelectorAll('[data-reveal]').forEach((b) => {
     b.onclick = () => invoke('client:reveal', { p: b.dataset.reveal });
   });
-  const bl = $('btnLinkVesktop');
-  if (bl) bl.onclick = () => doVesktopLink(false);
-  const bul = $('btnUnlinkVesktop');
-  if (bul) bul.onclick = async () => { await invoke('vesktop:unlink', {}); refresh(); };
-  const brv = $('btnRunVesktop2');
-  if (brv) brv.onclick = async () => { await invoke('vesktop:run', {}); };
 
   // плагины
   $('pluginsList').innerHTML = S.config.plugins.map((p) => {
@@ -218,6 +192,7 @@ function renderAll() {
   // настройки
   $('setAutoCheck').checked = !!S.settings.autoCheckOnStart;
   $('setEnablePlugins').checked = !!S.settings.enablePlugins;
+  $('setOpenAsar').checked = !!S.settings.installOpenAsar;
   $('setInterval').value = String(S.settings.intervalHours || 6);
   $('scheduleState').textContent = S.schedule.enabled ? `включено (каждые ${S.schedule.hours} ч)` : 'выключено';
   $('pathsList').innerHTML = `
@@ -275,24 +250,13 @@ async function doUpdateAll() {
       });
       if (ok) {
         await invoke('task:updateAllForce', {});
-        toast('Готово — можно запускать Discord/Vesktop', 'ok', 6000);
+        toast('Готово — можно запускать Discord', 'ok', 6000);
       }
-    } else if (res.vesktopForeign) {
-      await maybeForeignVesktop(res.vesktopForeign);
     } else if (r.task && r.task.state === 'done') {
-      toast('Готово! Запускай Discord / Vesktop', 'ok', 6000);
+      toast('Готово! Запускай Discord', 'ok', 6000);
     }
     refresh();
   });
-}
-
-async function maybeForeignVesktop(cur) {
-  const ok = await ask({
-    title: 'Vesktop на чужой сборке',
-    body: `Vesktop сейчас указывает на:<br><code>${esc(cur)}</code><br><br>Перенаправить его на сборку VencForge?`,
-    okText: 'Перенаправить',
-  });
-  if (ok) await invoke('vesktop:link', { force: true });
 }
 
 async function doPatchFix() {
@@ -307,20 +271,10 @@ async function doPatchFix() {
         okText: 'Закрыть и пропатчить', danger: true,
       });
       if (ok) await invoke('task:patchOnly', { force: true });
-    } else if (res.vesktopForeign) {
-      await maybeForeignVesktop(res.vesktopForeign);
     }
     toast('Discord пропатчен текущей сборкой', 'ok');
     refresh();
   });
-}
-
-async function doVesktopLink(force) {
-  const r = await invoke('vesktop:link', { force });
-  if (r && r.result && r.result.vesktopForeign) {
-    await maybeForeignVesktop(r.result.vesktopForeign);
-  }
-  refresh();
 }
 
 async function doBuild() {
@@ -334,7 +288,7 @@ async function doBuild() {
 async function doUninstall() {
   const ok = await ask({
     title: 'Убрать VencForge с клиентов?',
-    body: 'Discord вернётся к оригиналу (<code>_app.asar</code> восстановлен), Vesktop отвяжется от нашей сборки, задача автообновления удалится. Папка данных останется.',
+    body: 'Discord вернётся к оригиналу (Vencord, OpenAsar и шим будут сняты), задача автообновления удалится. Папка данных останется.',
     okText: 'Убрать', danger: true,
   });
   if (!ok) return;
@@ -423,6 +377,11 @@ function wire() {
 
   $('setAutoCheck').onchange = async (e) => { await invoke('settings:set', { key: 'autoCheckOnStart', value: e.target.checked }); refresh(); };
   $('setEnablePlugins').onchange = async (e) => { await invoke('settings:set', { key: 'enablePlugins', value: e.target.checked }); refresh(); };
+  $('setOpenAsar').onchange = async (e) => {
+    await invoke('settings:set', { key: 'installOpenAsar', value: e.target.checked });
+    toast(e.target.checked ? 'OpenAsar будет ставиться при следующем патче' : 'OpenAsar выключен — снимется при следующем патче', 'ok');
+    refresh();
+  };
   $('btnSaveToken').onclick = async () => {
     await invoke('settings:set', { key: 'githubToken', value: $('setToken').value.trim() });
     $('setToken').value = '';

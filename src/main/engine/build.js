@@ -24,19 +24,19 @@ async function buildVencord({ onLine, force = false } = {}) {
   if (!node) throw new Error('Node.js недоступен — сборка невозможна');
   log.ok(`Node.js: ${node.version} (${node.mode === 'portable' ? 'портативный' : 'системный'})`);
 
-  const pnpmCjs = await tools.pnpmCjsPath(node, onLine);
-  if (!pnpmCjs) throw new Error('pnpm недоступен — сборка невозможна');
+  const pnpmTool = await tools.ensurePnpm(node, onLine);
+  if (!pnpmTool) throw new Error('pnpm недоступен — сборка невозможна');
 
   log.info('Устанавливаю зависимости Vencord (pnpm install)...');
-  let code = await tools.pnpm(node, pnpmCjs, ['install', '--frozen-lockfile'], VcDir, onLine);
+  let code = await tools.pnpm(node, pnpmTool, ['install', '--frozen-lockfile'], VcDir, onLine);
   if (code !== 0) {
     log.warn('install --frozen-lockfile не удался — пробую без lockfile');
-    code = await tools.pnpm(node, pnpmCjs, ['install', '--no-frozen-lockfile'], VcDir, onLine);
+    code = await tools.pnpm(node, pnpmTool, ['install', '--no-frozen-lockfile'], VcDir, onLine);
     if (code !== 0) throw new Error('pnpm install не удался');
   }
 
   log.info('Собираю Vencord (pnpm build)...');
-  code = await tools.pnpm(node, pnpmCjs, ['build'], VcDir, onLine);
+  code = await tools.pnpm(node, pnpmTool, ['build'], VcDir, onLine);
   if (code !== 0) throw new Error('pnpm build не удался');
 
   const mainJs = path.join(VcDir, 'dist', 'vencordDesktopMain.js');

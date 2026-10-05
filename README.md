@@ -1,8 +1,10 @@
 # VencForge
 
-**Свой менеджер сборок Vencord с графическим интерфейсом.** Собирает Vencord из исходников с твоими плагинами и устанавливает на Discord (Stable/PTB/Canary/Development) и Vesktop. Плагины выживают любые обновления, автообновление — по расписанию.
+**Свой менеджер сборок Vencord с графическим интерфейсом.** Собирает Vencord из исходников с твоими плагинами и устанавливает на Discord (Stable/PTB/Canary/Development) — с OpenAsar. Плагины выживают любые обновления, автообновление — по расписанию.
 
 Наследник идей [veskforge](https://github.com/Microck/veskforge), только локально, без Tauri-WebView и с поддержкой обычного Discord.
+
+> **Vesktop не трогаем.** Vesktop сидит на старой архитектуре Vencord, а на обычном Discord с нашей сборкой доступно всё то же и больше (включая OpenAsar) — поэтому VencForge Vesktop не обнаруживает, не патчит и не запускает. Установленный Vesktop продолжит работать как работал.
 
 ## Возможности
 
@@ -11,8 +13,9 @@
   - **Папка** — локальная папка с плагином (`index.ts/tsx/js/jsx` в корне или одной подпапке)
   - **Файл** — одиночный `.ts/.tsx/.js/.jsx` с `export default`
 - **Сборка Vencord** из свежих исходников (`pnpm install + build`), с пересозданием `src/userplugins` из списка при каждой сборке — **плагины не теряются** при обновлениях Vencord
-- **Установка на голый Discord** и поверх уже стоящего (в т.ч. от официального инсталлера Vencord): оригинальный `app.asar` сохраняется как `_app.asar`, рядом пишется шим, который грузит сборку из `%APPDATA%\VencForge\dist`
-- **Vesktop** подключается штатно — через `vencordDir` в `%APPDATA%\vesktop\state.json`
+- **Установка на голый Discord** и поверх уже стоящего (в т.ч. от официального инсталлера Vencord): оригинальный `app.asar` сохраняется как `app-original.asar`, рядом пишется шим, который грузит сборку из `%APPDATA%\VencForge\dist`
+- **OpenAsar** — ставится в Discord вместе с Vencord (можно отключить в настройках): быстрее запуск и свои плюшки загрузчика; оригинал всегда сохраняется, откат — одной кнопкой
+- **pnpm не требуется заранее** — VencForge сначала ищет уже установленный pnpm (PATH, standalone-установка, npm -g, corepack) и только если его нет — скачивает standalone `pnpm.exe` (без npm и прав администратора)
 - **Планировщик автообновления** (schtasks, 1–24 ч): тихо обновляет Vencord и плагины, пересобирает и перепатчивает Discord после его апдейтов; пропускает работу, если клиенты запущены, а пересборку — если ничего не изменилось
 - **Автопроверка при запуске** (настраивается)
 - **Портативный Node.js** скачивается сам, если системного нет или он старше 18 — **права администратора не нужны**
@@ -24,11 +27,11 @@
 1. Скачай **`VencForge-Portable.exe`** (одним файлом, без установки) или **`VencForge-Setup-x.y.z.exe`** со страницы [Releases](https://github.com/shxtai/VencForge/releases).
 2. Запусти. Всё остальное — в интерфейсе.
 
-Системные требования: Windows 10+ (Win10 2004+ для нативного звука P2PStream). `git` желателен, но не обязателен (фолбэк на zip). `node`/`pnpm` не нужны — скачаются сами.
+Системные требования: Windows 10+ (Win10 2004+ для нативного звука P2PStream). `git` желателен, но не обязателен (фолбэк на zip). `node`/`pnpm` не нужны — VencForge подберёт их сам.
 
 ## Быстрый старт
 
-1. **Главная → «Обновить и установить всё»** — VencForge скачает Vencord, подключит плагины (по умолчанию [P2PStream](https://github.com/shxtai/P2PStream)), соберёт, пропатчит найденные Discord и подключит Vesktop.
+1. **Главная → «Обновить и установить всё»** — VencForge скачает Vencord, подключит плагины (по умолчанию [P2PStream](https://github.com/shxtai/P2PStream)), соберёт, пропатчит найденные Discord (+ OpenAsar).
 2. Появится Discord с Vencord: **Settings → Plugins → включи P2PStream** (или он включится сам, если стоит галочка в настройках VencForge).
 3. Добавить ещё плагины: вкладка **«Плагины»** → Git-ссылка / папка / файл → **«Обновить исходники и собрать»** (вкладка «Сборка»).
 4. После крупного обновления Discord, если Vencord пропал: **«Починить Discord»**.
@@ -54,20 +57,25 @@
 ## Технические детали
 
 - Данные: `%APPDATA%\VencForge\` — `workspace` (исходники), `dist` (сборка), `plugins` (реестр плагинов), `tools` (портативный Node/pnpm), `config.json` (совместим со старым VencForge.bat), `state.json`.
-- Патч Discord: `resources\app.asar` → `_app.asar` (оригинал), вместо него — минимальный asar-шим с `require("...\VencForge\dist\patcher.js")`. Удаление — восстановление `_app.asar`.
-- Vesktop: `vencordDir` в `state.json` (строгий JSON без BOM).
-- Если Vesktop указывал на чужую сборку — приложение спросит, перенаправлять ли.
+- Патч Discord: схема файлов в `resources\`:
+  - `app.asar` — минимальный asar-шим: `require("...\VencForge\dist\patcher.js")` (наша сборка Vencord);
+  - `_app.asar` — то, что грузит шим: OpenAsar (если включён) или оригинал Discord;
+  - `app-original.asar` — нетронутый оригинал Discord (для отката OpenAsar и полного снятия).
+- OpenAsar: `https://github.com/GooseMod/OpenAsar/releases/download/nightly/app.asar`. Уже стоящий OpenAsar не перекачивается; при выключении настройки — снимается, `_app.asar` возвращается к оригиналу.
+- pnpm: порядок поиска — кэш VencForge → наш prefix → `where pnpm` (PATH) → `%LOCALAPPDATA%\pnpm\pnpm.exe` → npm global (`.cmd` → `pnpm.cjs` через node) → npm prefix → corepack. Установка (если ничего не нашлось): standalone `pnpm-win-x64.exe` с GitHub → `npm install -g pnpm --prefix` → corepack. Найденный тул кэшируется в `state.json`.
+- Vesktop не трогается намеренно (см. блок выше).
 
 ## Отличия от veskforge / официального инсталлера
 
 | | VencForge | veskforge | Офиц. инсталлер |
 |---|---|---|---|
 | Обычный Discord (Stable/PTB/Canary) | ✓ | — | ✓ |
-| Vesktop | ✓ | ✓ | ✓ |
+| OpenAsar ставится автоматически | ✓ | — | ✓ (галочка) |
 | Плагины: git / папка / файл | ✓ | git + папка/файл | — |
 | Сборка из исходников с плагинами | ✓ | ✓ | — |
 | Плагины переживают обновления Vencord | ✓ | ✓ | — |
 | Переживает обновления Discord | авто (расписание) | вручную | вручную |
+| pnpm: использует установленный у тебя | ✓ | — | — |
 | Права администратора | не нужны | — | не нужны |
 | Работает без git/node | ✓ (zip + портативный node) | — | ✓ |
 
@@ -82,4 +90,4 @@ npm run dist        # Windows: NSIS + portable в release/
 
 ## Диагностика
 
-Вкладка «Главная» → «Диагностика (в логи)» — версии git/node/pnpm, найденные клиенты и их статус, пути, последние строки лога. Лог-файл: `%APPDATA%\VencForge\logs\vencforge.log`.
+Вкладка «Главная» → «Диагностика (в логи)» — версии git/node/pnpm (и откуда pnpm взят), найденные клиенты и их статус (Vencord/OpenAsar), пути, последние строки лога. Лог-файл: `%APPDATA%\VencForge\logs\vencforge.log`.

@@ -47,7 +47,7 @@
           <div class="hero card">
             <div class="hero-main">
               <div class="hero-title" id="heroTitle">Добро пожаловать в VencForge</div>
-              <div class="hero-sub" id="heroSub">Собери Vencord со своими плагинами и установи на Discord или Vesktop.</div>
+              <div class="hero-sub" id="heroSub">Собери Vencord со своими плагинами и установи на Discord — с OpenAsar и без ограничений.</div>
               <div class="hero-actions">
                 <button class="btn primary" id="btnUpdateAll">Обновить и установить всё</button>
                 <button class="btn" id="btnBuildOnly">Только пересобрать</button>
@@ -84,7 +84,7 @@
 
         <!-- КЛИЕНТЫ -->
         <div class="tab hidden" id="tab-clients">
-          <div class="hint">VencForge патчит Discord так же, как официальный инсталлер Vencord: оригинальный <code>app.asar</code> сохраняется рядом как <code>_app.asar</code>. «Починить» нужно после крупных обновлений Discord — или просто нажми «Обновить и установить всё».</div>
+          <div class="hint">VencForge патчит Discord так же, как официальный инсталлер Vencord: оригинальный <code>app.asar</code> сохраняется как <code>app-original.asar</code>, а в <code>_app.asar</code> живёт OpenAsar (если включён). «Починить» нужно после крупных обновлений Discord — или просто нажми «Обновить и установить всё». Vesktop VencForge не трогает.</div>
           <div id="clientsList" class="cards-col"></div>
         </div>
 
@@ -129,8 +129,8 @@
             <div class="card-title">Как это работает</div>
             <div class="hint">
               VencForge клонирует Vencord в <code>%APPDATA%\VencForge\workspace</code>, кладёт плагины в <code>src/userplugins</code>,
-              запускает <code>pnpm install + build</code> (Node скачает сам, если не установлен) и копирует результат в
-              <code>%APPDATA%\VencForge\dist</code>. Затем патчит Discord и подключает Vesktop. При каждом обновлении
+              запускает <code>pnpm install + build</code> (Node/pnpm подберёт сам: системные или скачает) и копирует результат в
+              <code>%APPDATA%\VencForge\dist</code>. Затем патчит Discord (+ OpenAsar, если включён). При каждом обновлении
               исходников плагины пересоздаются из списка — поэтому они не теряются.
             </div>
           </div>
@@ -153,6 +153,7 @@
             <div class="card-title">Поведение</div>
             <label class="check"><input type="checkbox" id="setAutoCheck" /> Проверять обновления при запуске (тихо собрать и пропатчить, если что-то изменилось)</label>
             <label class="check"><input type="checkbox" id="setEnablePlugins" /> Включать плагины из списка в настройках Vencord после установки</label>
+            <label class="check"><input type="checkbox" id="setOpenAsar" /> Ставить OpenAsar в Discord (лёгкая замена загрузчика Discord — быстрее запуск, свои тёмные темы; оригинал сохраняется)</label>
           </div>
           <div class="card">
             <div class="card-title">Автообновление по расписанию</div>

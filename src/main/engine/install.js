@@ -1,12 +1,18 @@
-// VencForge — установка: патч Discord (asar-шим), настройки Vencord, Vesktop (vencordDir)
+// VencForge — установка: патч Discord (asar-шим) + OpenAsar, настройки Vencord
+// Схема файлов в resources Discord:
+//   app.asar          — наш шим (require patcher.js сборки VencForge)
+//   _app.asar         — то, что грузит шим: OpenAsar (если включён) или оригинал Discord
+//   app-original.asar — нетронутая копия оригинала Discord (для отката OpenAsar/всего патча)
 const fs = require('fs');
 const path = require('path');
 const util = require('./util');
 const log = require('./log');
 const { buildAsarShim } = require('./asar');
 const clients = require('./clients');
-const { DistDir, APPDATA, Root, Workspace, PnpmPrefix } = require('./paths');
+const { DistDir, APPDATA, Root } = require('./paths');
 const { getConfig, getState } = require('./store');
+
+const OPENASAR_URL = 'https://github.com/GooseMod/OpenAsar/releases/download/nightly/app.asar';
 
 function requirePatcher() {
   const patcher = path.join(DistDir, 'patcher.js');
@@ -14,24 +20,76 @@ function requirePatcher() {
   return patcher;
 }
 
-// патч всех найденных Discord: app.asar -> _app.asar (оригинал) + наш шим
+// внутри asar'а OpenAsar есть строки "OpenAsar"; в оригинальном Discord их нет
+function isOpenAsarAsar(p) {
+  try {
+    const st = fs.statSync(p);
+    if (!st.isFile() || st.size < 4096) return false;
+    const fd = fs.openSync(p, 'r');
+    const len = Math.min(st.size, 4 * 1024 * 1024);
+    const buf = Buffer.alloc(len);
+    fs.readSync(fd, buf, 0, len, 0);
+    fs.closeSync(fd);
+    return /openasar/i.test(buf.toString('latin1'));
+  } catch {
+    return false;
+  }
+}
+
+function asarStatus(di) {
+  const appAsar = path.join(di.resources, 'app.asar');
+  const backupAsar = path.join(di.resources, '_app.asar');
+  if (!util.exists(backupAsar)) return { patched: false, openAsar: false };
+  return { patched: true, openAsar: isOpenAsarAsar(backupAsar) };
+}
+
+// патч всех найденных Discord: шим + (опционально) OpenAsar
 async function patchDiscord() {
   const patcher = requirePatcher();
   const installs = clients.findDiscordInstalls();
+  const wantOpenAsar = !!getState().settings.installOpenAsar;
   let n = 0;
   for (const di of installs) {
     const appAsar = path.join(di.resources, 'app.asar');
     const backupAsar = path.join(di.resources, '_app.asar');
+    const originalAsar = path.join(di.resources, 'app-original.asar');
     try {
-      if (!di.patched && di.appAsarExists) {
-        fs.renameSync(appAsar, backupAsar);
+      // 1. бэкап оригинала (один раз, потом никогда не трогаем)
+      if (!util.exists(originalAsar)) {
+        if (util.exists(backupAsar)) fs.copyFileSync(backupAsar, originalAsar);
+        else if (util.exists(appAsar)) fs.copyFileSync(appAsar, originalAsar);
+      }
+
+      // 2. _app.asar — то, что грузит наш шим
+      if (!util.exists(backupAsar)) {
+        if (util.exists(appAsar)) fs.renameSync(appAsar, backupAsar);
+        else if (util.exists(originalAsar)) fs.copyFileSync(originalAsar, backupAsar);
       }
       if (!util.exists(backupAsar)) {
         log.warn(`Discord ${di.label}: нет app.asar — пропускаю`);
         continue;
       }
+
+      // 3. OpenAsar
+      if (wantOpenAsar) {
+        if (isOpenAsarAsar(backupAsar)) {
+          log.info(`Discord ${di.label}: OpenAsar уже установлен`);
+        } else {
+          try {
+            await util.download(OPENASAR_URL, backupAsar);
+            log.ok(`Discord ${di.label}: OpenAsar установлен (оригинал сохранён в app-original.asar)`);
+          } catch (e) {
+            log.warn(`Discord ${di.label}: OpenAsar скачать не удалось (${e.message}) — продолжаю без него`);
+          }
+        }
+      } else if (isOpenAsarAsar(backupAsar) && util.exists(originalAsar)) {
+        fs.copyFileSync(originalAsar, backupAsar);
+        log.info(`Discord ${di.label}: OpenAsar снят (в настройках выключен)`);
+      }
+
+      // 4. наш шим поверх
       buildAsarShim(patcher, appAsar);
-      log.ok(`Discord ${di.label}: патч обновлён (оригинал хранится как _app.asar)`);
+      log.ok(`Discord ${di.label}: патч обновлён${wantOpenAsar ? ' + OpenAsar' : ''} (Vencord из сборки VencForge)`);
       n++;
     } catch (e) {
       log.err(`Discord ${di.label}: не удалось пропатчить — ${e.message} (клиент запущен?)`);
@@ -50,10 +108,14 @@ async function unpatchDiscord() {
   for (const di of installs) {
     const appAsar = path.join(di.resources, 'app.asar');
     const backupAsar = path.join(di.resources, '_app.asar');
-    if (!util.exists(backupAsar)) continue;
+    const originalAsar = path.join(di.resources, 'app-original.asar');
+    if (!util.exists(backupAsar) && !util.exists(originalAsar)) continue;
     try {
+      const src = util.exists(originalAsar) ? originalAsar : backupAsar;
+      if (util.exists(originalAsar) && util.exists(backupAsar)) fs.rmSync(backupAsar, { force: true });
       if (util.exists(appAsar)) fs.rmSync(appAsar, { force: true });
-      fs.renameSync(backupAsar, appAsar);
+      fs.copyFileSync(src, appAsar);
+      if (util.exists(originalAsar)) fs.rmSync(originalAsar, { force: true });
       log.ok(`Discord ${di.label}: оригинал восстановлен`);
       n++;
     } catch (e) {
@@ -88,47 +150,6 @@ async function applyVencordSettings() {
   }
 }
 
-// Vesktop: vencordDir -> наша сборка (state.json, строгий JSON без BOM)
-async function linkVesktop({ force = false } = {}) {
-  const vdir = path.join(APPDATA, 'vesktop');
-  if (!util.exists(vdir)) {
-    log.info('Vesktop не установлен — шаг пропущен');
-    return { done: true, skipped: true };
-  }
-  if (!util.exists(path.join(DistDir, 'vencordDesktopMain.js'))) {
-    log.err('Нет сборки (dist) — сначала собери Vencord');
-    return { done: false };
-  }
-  const statePath = path.join(vdir, 'state.json');
-  const state = util.readJson(statePath) || {};
-  const cur = state.vencordDir || null;
-  if (cur && path.normalize(cur).toLowerCase() !== path.normalize(DistDir).toLowerCase()) {
-    if (!force) {
-      return { done: false, foreign: cur };
-    }
-    log.warn(`vencordDir был: ${cur} — перенаправляю на сборку VencForge`);
-  }
-  state.vencordDir = DistDir;
-  util.writeJsonNoBom(statePath, state);
-  log.ok('Vesktop подключён к сборке VencForge: ' + DistDir);
-  return { done: true };
-}
-
-async function unlinkVesktop() {
-  const statePath = path.join(APPDATA, 'vesktop', 'state.json');
-  if (!util.exists(statePath)) return;
-  const state = util.readJson(statePath);
-  if (state && state.vencordDir) {
-    if (path.normalize(state.vencordDir).toLowerCase() === path.normalize(DistDir).toLowerCase()) {
-      delete state.vencordDir;
-      util.writeJsonNoBom(statePath, state);
-      log.ok('Vesktop: vencordDir снят (вернулся к официальной сборке)');
-    } else {
-      log.info('Vesktop указывает на чужую сборку — не трогаю: ' + state.vencordDir);
-    }
-  }
-}
-
 // диагностика текстом в лог
 async function doctor() {
   const gitops = require('./gitops');
@@ -138,24 +159,24 @@ async function doctor() {
   const node = await tools.systemNodeVersion();
   log.info(`git: ${g ? 'есть' : 'НЕТ (буду качать zip)'}`);
   log.info(`node (системный): ${node ? node.raw : 'НЕТ'}`);
-  const pn = util.exists(path.join(PnpmPrefix, 'node_modules', 'pnpm', 'bin', 'pnpm.cjs'));
-  log.info(`pnpm (VencForge): ${pn ? 'установлен' : 'будет установлен при сборке'}`);
+  const pn = tools.probePnpm();
+  log.info(`pnpm: ${pn ? `${pn.path} (${pn.src})` : 'не найден — подберу/установлю при сборке'}`);
   log.info(`папка данных: ${Root}`);
-  log.info(`workspace: ${Workspace}`);
   log.info(`dist: ${DistDir} — ${util.exists(path.join(DistDir, 'patcher.js')) ? 'сборка есть' : 'нет сборки'}`);
   const cfg = getConfig();
   for (const p of cfg.plugins) {
     const src = p.type === 'git' ? p.url : (p.sourcePath || '?');
     log.info(`плагин: ${p.name} (${p.type}) -> ${src}`);
   }
+  const wantOpenAsar = !!getState().settings.installOpenAsar;
+  log.info(`OpenAsar: ${wantOpenAsar ? 'включён в установку' : 'выключен в настройках'}`);
   for (const di of clients.findDiscordInstalls()) {
-    log.info(`Discord ${di.label} ${di.version}: ${di.patched ? 'пропатчен' : 'оригинал'} (${di.resources})`);
+    const st = asarStatus(di);
+    log.info(`Discord ${di.label} ${di.version}: ${st.patched ? 'пропатчен' : 'оригинал'}${st.patched ? (st.openAsar ? ' + OpenAsar' : ' без OpenAsar') : ''} (${di.resources})`);
   }
-  const st = util.readJson(path.join(APPDATA, 'vesktop', 'state.json'));
-  log.info(`Vesktop vencordDir: ${st && st.vencordDir ? st.vencordDir : 'по умолчанию'}`);
   const running = await clients.getRunningClients();
   log.info(`запущено клиентов: ${running.length ? running.join(', ') : 'нет'}`);
   log.info('=== конец диагностики ===');
 }
 
-module.exports = { patchDiscord, unpatchDiscord, applyVencordSettings, linkVesktop, unlinkVesktop, doctor, requirePatcher };
+module.exports = { patchDiscord, unpatchDiscord, applyVencordSettings, doctor, requirePatcher, asarStatus };

@@ -1,7 +1,7 @@
 {
   "name": "vencforge",
-  "version": "1.1.0",
-  "description": "VencForge — свой менеджер сборок Vencord с GUI: плагины из Git/папки/файла, сборка Vencord, патч Discord и Vesktop, автообновление",
+  "version": "1.2.0",
+  "description": "VencForge — свой менеджер сборок Vencord с GUI: плагины из Git/папки/файла, сборка Vencord, OpenAsar, патч Discord, автообновление",
   "main": "src/main/main.js",
   "author": "shxtai",
   "homepage": "https://github.com/shxtai/VencForge",

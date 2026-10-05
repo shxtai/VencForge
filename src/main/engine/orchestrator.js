@@ -63,21 +63,11 @@ async function updateEverything({ what = 'full', silent = false, onLine } = {}) 
     return { done: false, needClose: running };
   }
 
-  // 6. патч + настройки
+  // 6. патч (+ OpenAsar по настройке) + настройки
   await install.patchDiscord();
   await install.applyVencordSettings();
 
-  // 7. Vesktop
-  const lv = await install.linkVesktop({ force: false });
-  if (lv.foreign) {
-    if (silent) {
-      log.warn(`Vesktop указывает на чужую сборку (${lv.foreign}) — не трогаю`);
-    } else {
-      return { done: false, vesktopForeign: lv.foreign, patched: true };
-    }
-  }
-
-  log.ok('Готово. Запускай Discord / Vesktop.');
+  log.ok('Готово. Запускай Discord.');
   return { done: true, patched: true };
 }
 

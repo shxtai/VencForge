@@ -72,10 +72,9 @@ async function buildState() {
   const distReady = fs.existsSync(path.join(paths.DistDir, 'patcher.js'));
   const distMain = fs.existsSync(path.join(paths.DistDir, 'vencordDesktopMain.js'));
   const installs = clients.findDiscordInstalls();
-  const vesktop = clients.vesktopInfo(paths.DistDir);
   const running = await clients.getRunningClients();
   const head = await gitops.gitHead(paths.VcDir);
-  const pnpmReady = fs.existsSync(path.join(paths.PnpmPrefix, 'node_modules', 'pnpm', 'bin', 'pnpm.cjs'));
+  const pnpmTool = tools.probePnpm();
   const node = await tools.systemNodeVersion();
   return {
     version: app.getVersion(),
@@ -98,10 +97,9 @@ async function buildState() {
       git: await gitops.hasGit(),
       node: node ? node.raw : null,
       nodePortable: !!tools.portableNodeExe(),
-      pnpm: pnpmReady,
+      pnpm: pnpmTool ? { kind: pnpmTool.kind, path: pnpmTool.path, src: pnpmTool.src } : null,
     },
-    clients: installs,
-    vesktop,
+    clients: installs.map((c) => ({ ...c, openAsar: install.asarStatus(c).openAsar })),
     running,
     schedule: { enabled: await schedule.scheduleExists(), hours: st.settings.intervalHours },
     settings: st.settings,
@@ -132,7 +130,6 @@ handle('state:get', () => buildState());
 handle('task:updateAll', ({ force }) => startTask('updateAll', 'Обновление и установка', async () => {
   const res = await updateEverything({ what: 'full', silent: false });
   if (res.needClose) return { needClose: res.needClose, detail: 'Клиенты запущены: ' + res.needClose.join(', ') };
-  if (res.vesktopForeign) return { vesktopForeign: res.vesktopForeign, detail: 'Vesktop указывает на другую сборку' };
   return { detail: 'Готово', res };
 }));
 
@@ -162,8 +159,7 @@ handle('task:patchOnly', ({ force }) => startTask('patchOnly', 'Патч кли�
   }
   await install.patchDiscord();
   await install.applyVencordSettings();
-  const lv = await install.linkVesktop({ force: false });
-  return { detail: 'Готово', vesktopForeign: lv.foreign || null };
+  return { detail: 'Готово' };
 }));
 
 handle('task:uninstall', ({ force }) => startTask('uninstall', 'Возврат клиентов к оригиналу', async () => {
@@ -171,7 +167,6 @@ handle('task:uninstall', ({ force }) => startTask('uninstall', 'Возврат �
   if (running.length && !force) return { needClose: running };
   if (running.length && force) await clients.killClients(running);
   await install.unpatchDiscord();
-  await install.unlinkVesktop();
   await schedule.removeSchedule();
   return { detail: 'VencForge снят с клиентов. Папка ' + paths.Root + ' оставлена.' };
 }));
@@ -199,17 +194,6 @@ handle('plugins:remove', ({ name }) => startTask('plugin-remove-' + name, 'Уд�
   return { detail: 'Плагин удалён из списка. Пересобери Vencord, чтобы убрать его из сборки' };
 }));
 
-handle('vesktop:link', ({ force }) => startTask('vesktop-link', 'Подключение Vesktop', async () => {
-  const r = await install.linkVesktop({ force: !!force });
-  if (r.foreign) return { vesktopForeign: r.foreign };
-  return { detail: r.done && !r.skipped ? 'Vesktop подключён к сборке VencForge' : 'Vesktop не установлен' };
-}));
-
-handle('vesktop:unlink', () => startTask('vesktop-unlink', 'Отвязка Vesktop', async () => {
-  await install.unlinkVesktop();
-  return { detail: 'Готово' };
-}));
-
 handle('clients:run', ({ branch }) => {
   const inst = clients.findDiscordInstalls().find((d) => d.branch === branch);
   if (inst) {
@@ -217,12 +201,6 @@ handle('clients:run', ({ branch }) => {
     if (fs.existsSync(exe)) { spawnDetached(exe); return { ok: true }; }
   }
   return { ok: false, error: 'Не нашёл ' + branch };
-});
-
-handle('vesktop:run', () => {
-  const v = clients.vesktopInfo(paths.DistDir);
-  if (v.found && v.exe && fs.existsSync(v.exe)) { spawnDetached(v.exe); return { ok: true }; }
-  return { ok: false, error: 'Vesktop не найден' };
 });
 
 function spawnDetached(exe) {
@@ -252,7 +230,7 @@ handle('dialog:pickFile', async () => {
 });
 
 handle('settings:set', ({ key, value }) => {
-  const allowed = ['autoCheckOnStart', 'enablePlugins', 'intervalHours', 'githubToken'];
+  const allowed = ['autoCheckOnStart', 'enablePlugins', 'installOpenAsar', 'intervalHours', 'githubToken'];
   if (!allowed.includes(key)) return { error: 'Нет такого параметра' };
   store.setSetting(key, value);
   return { ok: true };

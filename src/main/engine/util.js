@@ -8,14 +8,30 @@ const http = require('http');
 function log2(txt) { const log = require('./log'); log.raw(txt); }
 
 // ---------------------------------------------------------------- процессы
+const IS_WIN = process.platform === 'win32';
+
+// .cmd/.bat на Windows нельзя спавнить без shell (Node >= 18.20/20.12: EINVAL, CVE-2024-27980)
+function needsShell(cmd) {
+  if (!IS_WIN) return false;
+  if (/\.(cmd|bat)$/i.test(cmd)) return true;
+  return /^(npm|npx|pnpm|yarn|corepack)(\.cmd)?$/i.test(path.basename(cmd));
+}
+
+// при shell:true собираем одну строку и квотим пути с пробелами
+function shellLine(cmd, args) {
+  const q = (s) => (/\s/.test(String(s)) ? '"' + String(s).replace(/"/g, '""') + '"' : String(s));
+  return [q(cmd), ...args.map(q)].join(' ');
+}
+
 function exec(cmd, args, opts = {}) {
   return new Promise((resolve) => {
     let stdout = '', stderr = '';
+    const useShell = !!opts.shell || needsShell(cmd);
     let p;
     try {
-      p = spawn(cmd, args, {
-        cwd: opts.cwd, env: opts.env, windowsHide: true, shell: !!opts.shell,
-      });
+      p = useShell
+        ? spawn(shellLine(cmd, args), { cwd: opts.cwd, env: opts.env, windowsHide: true, shell: true })
+        : spawn(cmd, args, { cwd: opts.cwd, env: opts.env, windowsHide: true });
     } catch (e) {
       return resolve({ code: -1, stdout: '', stderr: String(e && e.message || e) });
     }
@@ -26,12 +42,15 @@ function exec(cmd, args, opts = {}) {
   });
 }
 
-// потоковый запуск с построчным выводом (без shell)
-function stream(cmd, args, { cwd, env, onLine } = {}) {
+// потоковый запуск с построчным выводом
+function stream(cmd, args, { cwd, env, onLine, shell } = {}) {
   return new Promise((resolve) => {
+    const useShell = !!shell || needsShell(cmd);
     let p;
     try {
-      p = spawn(cmd, args, { cwd, env, windowsHide: true });
+      p = useShell
+        ? spawn(shellLine(cmd, args), { cwd, env, windowsHide: true, shell: true })
+        : spawn(cmd, args, { cwd, env, windowsHide: true });
     } catch (e) {
       if (onLine) onLine('err', String(e && e.message || e));
       return resolve(-1);
@@ -124,7 +143,7 @@ function readJson(p) {
   } catch { return null; }
 }
 
-// JSON строго без BOM (Vencord и Vesktop читают строгий JSON)
+// JSON строго без BOM (строгие читатели вроде Vencord/Vesktop ждут чистый JSON)
 function writeJsonNoBom(p, obj) {
   fs.mkdirSync(path.dirname(p), { recursive: true });
   fs.writeFileSync(p, JSON.stringify(obj, null, 2), 'utf8');

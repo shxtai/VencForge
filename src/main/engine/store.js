@@ -54,6 +54,7 @@ function defaultState() {
     settings: {
       autoCheckOnStart: true,
       enablePlugins: true,
+      installOpenAsar: true,
       intervalHours: 6,
       githubToken: '',
     },

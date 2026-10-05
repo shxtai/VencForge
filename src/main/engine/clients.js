@@ -1,4 +1,5 @@
-// VencForge — обнаружение клиентов: Discord (Stable/PTB/Canary/Dev) и Vesktop
+// VencForge — обнаружение клиентов: Discord (Stable/PTB/Canary/Dev)
+// Vesktop НЕ трогаем: он на старой архитектуре и не является целевым клиентом
 const fs = require('fs');
 const path = require('path');
 const { LOCALAPPDATA, APPDATA } = require('./paths');
@@ -11,7 +12,7 @@ const BRANCH_LABELS = {
   DiscordCanary: 'Discord Canary',
   DiscordDevelopment: 'Discord Development',
 };
-const CLIENT_EXES = ['Discord.exe', 'DiscordPTB.exe', 'DiscordCanary.exe', 'DiscordDevelopment.exe', 'Vesktop.exe'];
+const CLIENT_EXES = ['Discord.exe', 'DiscordPTB.exe', 'DiscordCanary.exe', 'DiscordDevelopment.exe'];
 
 function findDiscordInstalls() {
   const list = [];
@@ -47,32 +48,6 @@ function findDiscordInstalls() {
   return list;
 }
 
-function vesktopInfo(distDir) {
-  const dataDir = path.join(APPDATA, 'vesktop');
-  if (!exists(dataDir)) return { found: false };
-  const statePath = path.join(dataDir, 'state.json');
-  let vencordDir = null;
-  const st = readJson(statePath);
-  if (st && st.vencordDir) vencordDir = st.vencordDir;
-  let exe = null;
-  for (const cand of [
-    path.join(LOCALAPPDATA, 'Programs', 'vesktop', 'Vesktop.exe'),
-    path.join(LOCALAPPDATA, 'Programs', 'Vesktop', 'Vesktop.exe'),
-    path.join(LOCALAPPDATA, 'vesktop', 'Vesktop.exe'),
-    path.join(LOCALAPPDATA, 'Vesktop', 'Vesktop.exe'),
-  ]) {
-    if (exists(cand)) { exe = cand; break; }
-  }
-  return {
-    found: true,
-    exe,
-    statePath,
-    vencordDir,
-    linked: !!vencordDir && distDir && path.normalize(vencordDir).toLowerCase() === path.normalize(distDir).toLowerCase(),
-    foreign: !!vencordDir && distDir && path.normalize(vencordDir).toLowerCase() !== path.normalize(distDir).toLowerCase(),
-  };
-}
-
 async function getRunningClients() {
   const r = await exec('tasklist', ['/FO', 'CSV', '/NH']);
   if (r.code !== 0 && !r.stdout) return [];
@@ -98,4 +73,4 @@ async function killClients(names) {
   return out;
 }
 
-module.exports = { findDiscordInstalls, vesktopInfo, getRunningClients, killClients, BRANCHES, BRANCH_LABELS, CLIENT_EXES };
+module.exports = { findDiscordInstalls, getRunningClients, killClients, BRANCHES, BRANCH_LABELS, CLIENT_EXES };
