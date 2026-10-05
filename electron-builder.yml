@@ -1,0 +1,26 @@
+appId: dev.shxtai.vencforge
+productName: VencForge
+toolsets:
+  wine: "1.0.1"
+directories:
+  output: release
+  buildResources: build
+files:
+  - src/**/*
+  - package.json
+  - "!**/*.map"
+asar: true
+win:
+  target:
+    - target: nsis
+    - target: portable
+  icon: build/icon.ico
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  artifactName: VencForge-Setup-${version}.${ext}
+  shortcutName: VencForge
+portable:
+  artifactName: VencForge-${version}-Portable.${ext}

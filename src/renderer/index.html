@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;" />
+  <title>VencForge</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <div class="logo">
+        <div class="logo-icon">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4.5 19.5 10"/><path d="M12.5 6 18 11.5c1 1 .5 2.5-.7 2.9-1 .3-2.3 0-3.3-1L8.5 8c-1-1-1.3-2.3-1-3.3.4-1.2 1.9-1.7 2.9-.7z"/><path d="m9 12-5.5 5.5c-.8.8-.8 2 0 2.8l.2.2c.8.8 2 .8 2.8 0L12 15"/></svg>
+        </div>
+        <div>
+          <div class="logo-name">VencForge</div>
+          <div class="logo-ver" id="verTag">…</div>
+        </div>
+      </div>
+      <nav id="nav">
+        <button class="nav-btn active" data-tab="home"><span class="ico">⌂</span>Главная</button>
+        <button class="nav-btn" data-tab="clients"><span class="ico">▣</span>Клиенты</button>
+        <button class="nav-btn" data-tab="plugins"><span class="ico">⛁</span>Плагины <span class="badge" id="pluginCount">0</span></button>
+        <button class="nav-btn" data-tab="build"><span class="ico">⚒</span>Сборка</button>
+        <button class="nav-btn" data-tab="logs"><span class="ico">☰</span>Логи</button>
+        <button class="nav-btn" data-tab="settings"><span class="ico">⚙</span>Настройки</button>
+      </nav>
+      <div class="sidebar-footer">
+        <a href="#" id="ghLink">github.com/shxtai/VencForge</a>
+      </div>
+    </aside>
+
+    <main id="main">
+      <header id="topbar">
+        <h1 id="tabTitle">Главная</h1>
+        <div id="taskChip" class="task-chip hidden">
+          <span class="spinner"></span>
+          <span id="taskLabel">Задача…</span>
+        </div>
+        <div class="top-status" id="topStatus"></div>
+      </header>
+
+      <section id="content">
+        <!-- ГЛАВНАЯ -->
+        <div class="tab" id="tab-home">
+          <div class="hero card">
+            <div class="hero-main">
+              <div class="hero-title" id="heroTitle">Добро пожаловать в VencForge</div>
+              <div class="hero-sub" id="heroSub">Собери Vencord со своими плагинами и установи на Discord или Vesktop.</div>
+              <div class="hero-actions">
+                <button class="btn primary" id="btnUpdateAll">Обновить и установить всё</button>
+                <button class="btn" id="btnBuildOnly">Только пересобрать</button>
+                <button class="btn" id="btnPatchFix">Починить Discord</button>
+              </div>
+            </div>
+            <div class="hero-stats" id="heroStats"></div>
+          </div>
+
+          <div class="grid2">
+            <div class="card">
+              <div class="card-title">Статус</div>
+              <div id="statusList" class="kv-list"></div>
+            </div>
+            <div class="card">
+              <div class="card-title">Клиенты</div>
+              <div id="homeClients" class="mini-list"></div>
+            </div>
+          </div>
+
+          <div class="card warning-card hidden" id="runningWarn">
+            ⚠ Запущены: <span id="runningNames"></span>. Для установки патча клиенты нужно закрыть — VencForge предложит это сам.
+          </div>
+
+          <div class="card">
+            <div class="card-title">Прочее</div>
+            <div class="row">
+              <button class="btn subtle" id="btnUninstall">Убрать VencForge с клиентов</button>
+              <button class="btn subtle" id="btnDoctor">Диагностика (в логи)</button>
+              <button class="btn subtle" id="btnOpenRoot">Открыть папку данных</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- КЛИЕНТЫ -->
+        <div class="tab hidden" id="tab-clients">
+          <div class="hint">VencForge патчит Discord так же, как официальный инсталлер Vencord: оригинальный <code>app.asar</code> сохраняется рядом как <code>_app.asar</code>. «Починить» нужно после крупных обновлений Discord — или просто нажми «Обновить и установить всё».</div>
+          <div id="clientsList" class="cards-col"></div>
+        </div>
+
+        <!-- ПЛАГИНЫ -->
+        <div class="tab hidden" id="tab-plugins">
+          <div class="card">
+            <div class="card-title">Добавить плагин</div>
+            <div class="hint">Поддерживаются плагины в формате Vencord (userplugins): папка или репозиторий с <code>index.ts/tsx/js/jsx</code> (в корне или одной подпапке) либо одиночный файл с <code>export default</code>.</div>
+            <div class="row add-row">
+              <input type="text" id="gitUrl" placeholder="https://github.com/author/Plugin — ссылка на репозиторий" />
+              <button class="btn primary" id="btnAddGit">Добавить из Git</button>
+            </div>
+            <div class="row">
+              <button class="btn" id="btnAddFolder">Выбрать папку…</button>
+              <button class="btn" id="btnAddFile">Выбрать файл…</button>
+              <span class="flex-sp"></span>
+              <span class="hint-inline">По умолчанию подключён P2PStream (git)</span>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title">Список плагинов</div>
+            <div id="pluginsList" class="plugins-list"></div>
+          </div>
+        </div>
+
+        <!-- СБОРКА -->
+        <div class="tab hidden" id="tab-build">
+          <div class="card">
+            <div class="card-title">Исходники Vencord</div>
+            <div class="row add-row">
+              <input type="text" id="vcRepo" placeholder="https://github.com/Vendicated/Vencord" />
+              <input type="text" id="vcBranch" style="max-width:130px" placeholder="main" />
+              <button class="btn" id="btnSaveVc">Сохранить</button>
+            </div>
+            <div class="kv-list" id="buildInfo"></div>
+            <div class="row">
+              <button class="btn primary" id="btnBuild">Обновить исходники и собрать</button>
+              <span class="hint-inline" id="buildPluginHint"></span>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title">Как это работает</div>
+            <div class="hint">
+              VencForge клонирует Vencord в <code>%APPDATA%\VencForge\workspace</code>, кладёт плагины в <code>src/userplugins</code>,
+              запускает <code>pnpm install + build</code> (Node скачает сам, если не установлен) и копирует результат в
+              <code>%APPDATA%\VencForge\dist</code>. Затем патчит Discord и подключает Vesktop. При каждом обновлении
+              исходников плагины пересоздаются из списка — поэтому они не теряются.
+            </div>
+          </div>
+        </div>
+
+        <!-- ЛОГИ -->
+        <div class="tab hidden" id="tab-logs">
+          <div class="row log-actions">
+            <button class="btn subtle" id="btnCopyLog">Копировать всё</button>
+            <button class="btn subtle" id="btnOpenLog">Открыть файл лога</button>
+            <span class="flex-sp"></span>
+            <span class="hint-inline" id="logPath"></span>
+          </div>
+          <div class="logbox" id="logbox"></div>
+        </div>
+
+        <!-- НАСТРОЙКИ -->
+        <div class="tab hidden" id="tab-settings">
+          <div class="card">
+            <div class="card-title">Поведение</div>
+            <label class="check"><input type="checkbox" id="setAutoCheck" /> Проверять обновления при запуске (тихо собрать и пропатчить, если что-то изменилось)</label>
+            <label class="check"><input type="checkbox" id="setEnablePlugins" /> Включать плагины из списка в настройках Vencord после установки</label>
+          </div>
+          <div class="card">
+            <div class="card-title">Автообновление по расписанию</div>
+            <div class="row">
+              <select id="setInterval">
+                <option value="1">каждый час</option>
+                <option value="3">каждые 3 часа</option>
+                <option value="6">каждые 6 часов</option>
+                <option value="12">каждые 12 часов</option>
+                <option value="24">раз в сутки</option>
+              </select>
+              <button class="btn primary" id="btnScheduleOn">Включить</button>
+              <button class="btn" id="btnScheduleOff">Выключить</button>
+              <span class="hint-inline" id="scheduleState"></span>
+            </div>
+            <div class="hint">Создаётся задача Windows «VencForge Auto-Update». Тихий пропуск: если клиенты запущены — патч отложится; если ничего не изменилось — сборка не повторяется.</div>
+          </div>
+          <div class="card">
+            <div class="card-title">GitHub-токен (необязательно)</div>
+            <div class="hint">Нужен только для приватных репозиториев плагинов или при упоре в лимиты GitHub. Токен хранится локально в <code>%APPDATA%\VencForge\state.json</code>.</div>
+            <div class="row add-row">
+              <input type="password" id="setToken" placeholder="ghp_… (пусто = не использовать)" />
+              <button class="btn" id="btnSaveToken">Сохранить</button>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-title">Пути</div>
+            <div class="kv-list" id="pathsList"></div>
+          </div>
+        </div>
+      </section>
+
+      <footer id="statusbar">
+        <div id="statusLeft"><span class="dot ok"></span> <span id="statusText">Готов</span></div>
+        <div id="statusRight"></div>
+      </footer>
+    </main>
+  </div>
+
+  <div class="overlay hidden" id="modal">
+    <div class="modal-card">
+      <div class="modal-title" id="modalTitle"></div>
+      <div class="modal-body" id="modalBody"></div>
+      <div class="modal-actions">
+        <button class="btn" id="modalCancel">Отмена</button>
+        <button class="btn danger hidden" id="modalDanger">Продолжить</button>
+        <button class="btn primary" id="modalOk">ОК</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toasts"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
