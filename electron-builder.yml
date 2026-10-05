@@ -1,7 +1,5 @@
 appId: dev.shxtai.vencforge
 productName: VencForge
-toolsets:
-  wine: "1.0.1"
 directories:
   output: release
   buildResources: build
