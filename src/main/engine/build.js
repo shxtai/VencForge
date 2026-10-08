@@ -43,17 +43,60 @@ async function buildVencord({ onLine, force = false } = {}) {
 
   const tInstall = Date.now();
   log.info('Устанавливаю зависимости Vencord (pnpm install)...');
-  let code = await tools.pnpm(node, pnpmTool, ['install', '--frozen-lockfile'], VcDir, onLine);
-  if (code !== 0) {
-    log.warn('install --frozen-lockfile не удался — пробую без lockfile');
-    code = await tools.pnpm(node, pnpmTool, ['install', '--no-frozen-lockfile'], VcDir, onLine);
-    if (code !== 0) throw new Error('pnpm install не удался');
+
+  // Санити-проверка установки: если node_modules остался от прошлой попытки
+  // (частично не удалился из-за хэндлов антивируса/esbuild), pnpm верит манифесту
+  // виртуального стора и «доустанавливает» несколько пакетов вместо всех — сборка
+  // падает на Missing-файлах (ERR_MODULE_NOT_FOUND внутри .pnpm). Считаем пакеты
+  // в lockfile и в .pnpm: сильное расхождение = установка битая.
+  const installLooksBroken = () => {
+    try {
+      const lock = fs.readFileSync(path.join(VcDir, 'pnpm-lock.yaml'), 'utf8');
+      const res = (lock.match(/resolution:/g) || []).length;
+      const pn = path.join(VcDir, 'node_modules', '.pnpm');
+      let dirs = 0;
+      if (util.exists(pn)) for (const e of fs.readdirSync(pn, { withFileTypes: true })) if (e.isDirectory() && !e.name.startsWith('.')) dirs++;
+      return res > 40 && dirs < res * 0.5 ? { res, dirs } : null;
+    } catch { return null; }
+  };
+
+  const runInstall = async (extra = []) => {
+    let c = await tools.pnpm(node, pnpmTool, ['install', '--frozen-lockfile', ...extra], VcDir, onLine);
+    if (c !== 0) {
+      log.warn('install --frozen-lockfile не удался — пробую без lockfile');
+      c = await tools.pnpm(node, pnpmTool, ['install', '--no-frozen-lockfile', ...extra], VcDir, onLine);
+    }
+    return c;
+  };
+
+  let code = await runInstall();
+  const nmDir = path.join(VcDir, 'node_modules');
+  let broken = installLooksBroken();
+  if (broken) {
+    log.warn(`pnpm поставил только ${broken.dirs} папок из ~${broken.res} пакетов — node_modules бит, чищу и ставлю принудительно`);
+    await util.killStrayBuilders();
+    util.rmrf(nmDir);
+    code = await runInstall(['--force']);
+    broken = installLooksBroken();
+    if (broken) throw new Error(`pnpm install битый (${broken.dirs} из ~${broken.res}) — мешает антивирус или недособранный диск; перезапусти ПК и повтори`);
   }
+  if (code !== 0) throw new Error('pnpm install не удался');
   const installSec = ((Date.now() - tInstall) / 1000).toFixed(1);
 
   const tBuild = Date.now();
   log.info('Собираю Vencord (pnpm build) — это живой esbuild из исходников...');
-  code = await tools.pnpm(node, pnpmTool, ['build'], VcDir, onLine);
+  let buildErrs = '';
+  const buildOnLine = (tag, line) => { if (tag === 'err') buildErrs += line + '\n'; if (onLine) onLine(tag, line); };
+  code = await tools.pnpm(node, pnpmTool, ['build'], VcDir, buildOnLine);
+  if (code !== 0 && /ERR_MODULE_NOT_FOUND|Cannot find package/.test(buildErrs)) {
+    // самовосстановление: хвосты убитой сборки/антивирус держат node_modules
+    log.warn('Похоже на битый node_modules — убиваю хвосты esbuild, чищу зависимости и собираю заново');
+    await util.killStrayBuilders();
+    util.rmrf(nmDir);
+    const hc = await runInstall(['--force']);
+    if (hc !== 0) throw new Error('pnpm install (восстановление) не удался');
+    code = await tools.pnpm(node, pnpmTool, ['build'], VcDir, buildOnLine);
+  }
   if (code !== 0) throw new Error('pnpm build не удался (весь вывод выше — смотри ошибки esbuild)');
   const buildSec = ((Date.now() - tBuild) / 1000).toFixed(1);
 

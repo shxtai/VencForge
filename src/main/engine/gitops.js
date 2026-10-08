@@ -66,9 +66,16 @@ async function syncViaZip(url, dir, branch, onLine) {
   const entries = fs.readdirSync(tmpUn);
   const inner = entries.map((e) => path.join(tmpUn, e)).find((p) => fs.statSync(p).isDirectory()) || tmpUn;
 
-  // подчистить недобитый каталог прошлых попыток (до 3 раз — хэндлы могут держать)
-  for (let i = 0; i < 3 && fs.existsSync(dir); i++) {
-    if (!util.rmrf(dir)) await util.sleep(300);
+  // подчистить прошлую попытку: хвостовые esbuild держат хэндлы в node_modules
+  await util.killStrayBuilders();
+  // Если вычистить НЕ удалось — падаем ГРОМКО: наложить свежие исходники поверх
+  // обрезков = битое дерево (pnpm потом «доставляет 8 пакетов» вместо всех)
+  for (let i = 0; i < 5 && fs.existsSync(dir); i++) {
+    util.rmrf(dir);
+    if (fs.existsSync(dir)) await util.sleep(400);
+  }
+  if (fs.existsSync(dir)) {
+    throw new Error(`Не смог полностью удалить старую папку ${dir} — её держит антивирус или чужой процесс. Перезапусти ПК (или убей esbuild.exe/node.exe в диспетчере) и повтори`);
   }
 
   // перенос с ретраями (EPERM от антивируса) и фолбэком на рекурсивную копию

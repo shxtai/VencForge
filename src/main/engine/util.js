@@ -174,6 +174,15 @@ async function renameWithRetry(src, dst, { tries = 10, delay = 350 } = {}) {
   }
 }
 
+// Хвостовые процессы esbuild от прерванных сборок держат хэндлы в node_modules —
+// из-за них rmrf не вычищает папку, а новая сборка получает битое дерево.
+// Убиваем ВСЕ esbuild.exe — это безопасно: их спавнят только сборщики.
+async function killStrayBuilders() {
+  if (process.platform !== 'win32') return false;
+  const r = await exec('taskkill', ['/F', '/IM', 'esbuild.exe', '/T']);
+  return r.code === 0;
+}
+
 function readJson(p) {
   try {
     const raw = fs.readFileSync(p, 'utf8').replace(/^\uFEFF/, '');
@@ -224,6 +233,6 @@ function copyFile(src, dest) {
 module.exports = {
   exec, stream, download, fetchText, unzip,
   exists, rmrf, rmrfSafe, readJson, writeJsonNoBom, copyDir, safeName, sleep,
-  renameWithRetry,
+  renameWithRetry, killStrayBuilders,
   fsx, pathKind, copyFile,
 };
