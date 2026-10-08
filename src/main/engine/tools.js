@@ -285,7 +285,12 @@ function probePnpm() {
 function buildEnv(node) {
   const env = { ...process.env };
   if (node && node.nodeDir) {
-    env.PATH = node.nodeDir + path.delimiter + (env.PATH || '');
+    // ВАЖНО: на Windows ключ называется Path, а на КОПИИ объекта ({...process.env})
+    // case-insensitive магия process.env не работает — env.PATH = ... создавал ВТОРОЙ
+    // ключ только с nodeDir, и у дочерних процессов терялся остальной PATH
+    // (git «не найден» при живом клоне, node при этом находился).
+    const key = Object.keys(env).find((k) => k.toLowerCase() === 'path') || 'PATH';
+    env[key] = node.nodeDir + path.delimiter + (env[key] || '');
     env.VENCFORGE_NODE = node.nodeExe;
   }
   return env;

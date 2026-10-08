@@ -38,6 +38,12 @@ async function buildVencord({ onLine, force = false } = {}) {
   if (!node) throw new Error('Node.js недоступен — сборка невозможна');
   log.ok(`Node.js: ${node.version} (${node.mode === 'portable' ? 'портативный' : 'системный'})`);
 
+  // Билд-скрипт Vencord ставит штамп версии через `git rev-parse` (scripts/build/common.mjs) —
+  // без git сборка падает невнятной ошибкой cmd. Проверяем заранее.
+  if (!(await gitops.hasGit())) {
+    throw new Error('Для сборки Vencord нужен Git (билд-скрипт ставит штамп версии через git). Установи Git для Windows и перезапусти VencForge');
+  }
+
   const pnpmTool = await tools.ensurePnpm(node, onLine);
   if (!pnpmTool) throw new Error('pnpm недоступен — сборка невозможна');
 

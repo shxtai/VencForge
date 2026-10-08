@@ -31,9 +31,42 @@ function shellLine(cmd, args) {
   return [q(cmd), ...args.map(q)].join(' ');
 }
 
+// ---------------------------------------------------------------- декод вывода
+// Вывод cmd.exe/утилит Windows идёт в cp866 — в логе получались кракозябры.
+// Линия валидного UTF-8 декодится как UTF-8; с невалидными байтами — как cp866.
+// Границы строк безопасны: в UTF-8 байт 0x0A не встречается внутри мультбайта.
+function decodeOutput(buf) {
+  const b = Buffer.isBuffer(buf) ? buf : Buffer.from(buf);
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(b); } catch { }
+  try { return new TextDecoder('ibm866').decode(b); } catch { }
+  return b.toString();
+}
+
+function makeLineDecoder() {
+  let tail = Buffer.alloc(0);
+  return {
+    push(d) {
+      const all = Buffer.concat([tail, Buffer.isBuffer(d) ? d : Buffer.from(d)]);
+      const lines = [];
+      let start = 0;
+      for (let i = 0; i < all.length; i++) {
+        if (all[i] === 0x0a) { lines.push(all.subarray(start, i)); start = i + 1; }
+      }
+      tail = all.subarray(start);
+      return lines.map(decodeOutput);
+    },
+    flush() {
+      if (!tail.length) return [];
+      const rest = decodeOutput(tail);
+      tail = Buffer.alloc(0);
+      return [rest];
+    },
+  };
+}
+
 function exec(cmd, args, opts = {}) {
   return new Promise((resolve) => {
-    let stdout = '', stderr = '';
+    const outBuf = [], errBuf = [];
     const useShell = !!opts.shell || needsShell(cmd);
     let p;
     try {
@@ -43,10 +76,10 @@ function exec(cmd, args, opts = {}) {
     } catch (e) {
       return resolve({ code: -1, stdout: '', stderr: String(e && e.message || e) });
     }
-    p.stdout && p.stdout.on('data', (d) => { stdout += d.toString(); });
-    p.stderr && p.stderr.on('data', (d) => { stderr += d.toString(); });
-    p.on('error', (e) => { stderr += String(e && e.message || e); });
-    p.on('close', (code) => resolve({ code: code == null ? -1 : code, stdout, stderr }));
+    p.stdout && p.stdout.on('data', (d) => outBuf.push(d));
+    p.stderr && p.stderr.on('data', (d) => errBuf.push(d));
+    p.on('error', (e) => errBuf.push(Buffer.from(String(e && e.message || e))));
+    p.on('close', (code) => resolve({ code: code == null ? -1 : code, stdout: decodeOutput(Buffer.concat(outBuf)), stderr: decodeOutput(Buffer.concat(errBuf)) }));
   });
 }
 
@@ -63,22 +96,21 @@ function stream(cmd, args, { cwd, env, onLine, shell } = {}) {
       if (onLine) onLine('err', String(e && e.message || e));
       return resolve(-1);
     }
-    const feeder = (tag) => {
-      let buf = '';
-      return (d) => {
-        buf += d.toString();
-        let i;
-        while ((i = buf.indexOf('\n')) >= 0) {
-          const line = buf.slice(0, i).replace(/\r$/, '');
-          buf = buf.slice(i + 1);
+    const mkFeeder = (tag) => {
+      const dec = makeLineDecoder();
+      const emit = (lines) => {
+        for (const raw of lines) {
+          const line = String(raw).replace(/\r$/, '');
           if (line && onLine) onLine(tag, line);
         }
       };
+      return { on: (d) => emit(dec.push(d)), done: () => emit(dec.flush()) };
     };
-    if (p.stdout) p.stdout.on('data', feeder('out'));
-    if (p.stderr) p.stderr.on('data', feeder('err'));
+    const fOut = mkFeeder('out'), fErr = mkFeeder('err');
+    if (p.stdout) p.stdout.on('data', fOut.on);
+    if (p.stderr) p.stderr.on('data', fErr.on);
     p.on('error', (e) => { if (onLine) onLine('err', String(e && e.message || e)); });
-    p.on('close', (c) => resolve(c == null ? -1 : c));
+    p.on('close', (c) => { fOut.done(); fErr.done(); resolve(c == null ? -1 : c); });
   });
 }
 
