@@ -98,7 +98,8 @@ async function patchOne(di, { patcher, wantOpenAsar } = {}) {
       if (!rmrfSafe(backupAsar)) throw new Error('не смог удалить папку _app.asar (клиент запущен?)');
     }
     if (appKind === 'file') {
-      fsx.renameSync(appAsar, backupAsar);
+      // ретраи: Defender/запущенный Discord держат хэндл на app.asar — rename кидает EPERM
+      await util.renameWithRetry(appAsar, backupAsar);
     } else if (util.exists(originalAsar)) {
       copyFile(originalAsar, backupAsar);
     } else if (wantOpenAsar) {

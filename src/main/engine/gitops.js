@@ -51,16 +51,29 @@ async function syncViaZip(url, dir, branch, onLine) {
   }
   if (!okBranch) throw new Error(`Не удалось скачать ${info.owner}/${info.repo}: ${lastErr && lastErr.message}`);
 
-  const tmpUn = path.join(require('os').tmpdir(), `vencforge-un-${Date.now()}`);
-  await util.unzip(tmpZip, tmpUn);
-  try { fs.unlinkSync(tmpZip); } catch { }
+  // Распаковываем РЯДОМ с назначением (тот же том — rename возможен всегда):
+  // %TEMP% может быть на другом диске (rename между томами = EXDEV/EPERM),
+  // плюс свежераспакованное любят держать под хэндлами Defender/индексатор.
+  fs.mkdirSync(path.dirname(dir), { recursive: true });
+  const tmpUn = path.join(path.dirname(dir), `.${path.basename(dir)}.unzip-${Date.now()}`);
+  try {
+    await util.unzip(tmpZip, tmpUn);
+  } finally {
+    try { fs.unlinkSync(tmpZip); } catch { }
+  }
 
   // в архиве одна папка <repo>-<sha>; переносим содержимое в dir
-  util.rmrf(dir);
-  fs.mkdirSync(path.dirname(dir), { recursive: true });
   const entries = fs.readdirSync(tmpUn);
   const inner = entries.map((e) => path.join(tmpUn, e)).find((p) => fs.statSync(p).isDirectory()) || tmpUn;
-  fs.renameSync(inner, dir);
+
+  // подчистить недобитый каталог прошлых попыток (до 3 раз — хэндлы могут держать)
+  for (let i = 0; i < 3 && fs.existsSync(dir); i++) {
+    if (!util.rmrf(dir)) await util.sleep(300);
+  }
+
+  // перенос с ретраями (EPERM от антивируса) и фолбэком на рекурсивную копию
+  const how = await util.renameWithRetry(inner, dir);
+  if (how === 'copy') log.warn('rename не удался — исходники перенесены копированием');
   util.rmrf(tmpUn);
   return { ok: true, changed: true, mode: 'zip' };
 }
@@ -78,7 +91,8 @@ async function syncRepo({ url, dir, branch = 'main', onLine }) {
         // ветки может не быть — пробуем клон по умолчанию
         const r2 = await util.exec('git', ['clone', '--depth', '1', url, dir]);
         if (r2.code !== 0) {
-          say('err', 'git clone не удался, пробую zip-фолбэк');
+          const tail = String(r2.stderr || r.stderr || '').trim().split(/\r?\n/).filter(Boolean).pop();
+          say('err', 'git clone не удался' + (tail ? ` — ${tail.slice(0, 140)}` : '') + ', пробую zip-фолбэк');
           return syncViaZip(url, dir, branch, onLine);
         }
       }

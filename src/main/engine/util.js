@@ -145,6 +145,35 @@ function rmrf(p) {
   try { fs.rmSync(p, { recursive: true, force: true }); return true; } catch (e) { log2('rmrf ' + p + ': ' + (e && e.message)); return false; }
 }
 
+// rename с ретраями: Windows (Defender, индексатор, запущенный клиент) держит
+// хэндлы на свежих файлах/папках — renameSync кидает EPERM/EBUSY. Пауза и ретраи
+// решают почти всегда; последняя инстанция — копирование (не требует монопольного
+// хэндла). EXDEV (разные тома) ретраить бессмысленно — сразу копия.
+async function renameWithRetry(src, dst, { tries = 10, delay = 350 } = {}) {
+  const copy = () => {
+    const isDir = (() => { try { return fs.statSync(src).isDirectory(); } catch { return false; } })();
+    if (isDir) {
+      fs.cpSync(src, dst, { recursive: true });
+      fs.rmSync(src, { recursive: true, force: true });
+    } else {
+      fs.copyFileSync(src, dst);
+      fs.rmSync(src, { force: true });
+    }
+    return 'copy';
+  };
+  for (let attempt = 1; ; attempt++) {
+    try {
+      fs.renameSync(src, dst);
+      return 'rename';
+    } catch (e) {
+      const code = e && e.code;
+      const retryable = code === 'EPERM' || code === 'EBUSY' || code === 'EACCES' || code === 'ENOTEMPTY';
+      if (code === 'EXDEV' || !retryable || attempt >= tries) return copy();
+      await sleep(delay);
+    }
+  }
+}
+
 function readJson(p) {
   try {
     const raw = fs.readFileSync(p, 'utf8').replace(/^\uFEFF/, '');
@@ -195,5 +224,6 @@ function copyFile(src, dest) {
 module.exports = {
   exec, stream, download, fetchText, unzip,
   exists, rmrf, rmrfSafe, readJson, writeJsonNoBom, copyDir, safeName, sleep,
+  renameWithRetry,
   fsx, pathKind, copyFile,
 };
